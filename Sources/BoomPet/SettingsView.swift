@@ -21,6 +21,9 @@ struct SettingsView: View {
     let onChoosePetImage: () -> Void
     let onRestoreDefaultPet: () -> Void
     let onPetSizeChange: (CGFloat) -> Void
+    let onImportPetRig: () -> Void
+    let onRestoreDefaultRig: () -> Void
+    let onRevealPetRig: () -> Void
     let onStartOCR: () -> Void
     let onStartSticky: () -> Void
 
@@ -57,7 +60,10 @@ struct SettingsView: View {
                     language: language,
                     onChoosePetImage: onChoosePetImage,
                     onRestoreDefaultPet: onRestoreDefaultPet,
-                    onPetSizeChange: onPetSizeChange
+                    onPetSizeChange: onPetSizeChange,
+                    onImportPetRig: onImportPetRig,
+                    onRestoreDefaultRig: onRestoreDefaultRig,
+                    onRevealPetRig: onRevealPetRig
                 )
                 .tabItem {
                     Label(language.text("宠物", "Pet"), systemImage: "pawprint")
@@ -92,6 +98,10 @@ private struct ReminderSettingsTab: View {
 
     @State private var title = ""
     @State private var intervalMinutes = 30
+    @AppStorage(BoomPreferences.autoCloseKey) private var boomAutoClose = true
+    @AppStorage(BoomPreferences.autoCloseSecondsKey) private var boomAutoCloseSeconds = 4.5
+    @AppStorage(BoomPreferences.effectLevelKey) private var boomEffectLevel =
+        BoomEffectLevel.balanced.rawValue
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -129,6 +139,51 @@ private struct ReminderSettingsTab: View {
                         title = ""
                     }
                     .buttonStyle(.borderedProminent)
+                }
+                .padding(.vertical, 7)
+            }
+
+            GroupBox(language.text("BOOM 效果", "BOOM Effect")) {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 18) {
+                        Toggle(
+                            language.text("自动关闭", "Close automatically"),
+                            isOn: $boomAutoClose
+                        )
+                        if boomAutoClose {
+                            Stepper(
+                                value: $boomAutoCloseSeconds,
+                                in: 2...15,
+                                step: 0.5
+                            ) {
+                                Text(String(
+                                    format: language.text("%.1f 秒", "%.1f sec"),
+                                    boomAutoCloseSeconds
+                                ))
+                                .monospacedDigit()
+                                .frame(width: 76, alignment: .trailing)
+                            }
+                        }
+                        Spacer()
+                        Picker(
+                            language.text("特效强度", "Effect"),
+                            selection: $boomEffectLevel
+                        ) {
+                            Text(language.text("轻量", "Light"))
+                                .tag(BoomEffectLevel.light.rawValue)
+                            Text(language.text("标准", "Balanced"))
+                                .tag(BoomEffectLevel.balanced.rawValue)
+                            Text(language.text("闪亮", "Sparkly"))
+                                .tag(BoomEffectLevel.sparkle.rawValue)
+                        }
+                        .frame(width: 190)
+                    }
+                    Text(language.text(
+                        "动画结束后会冻结画面，不会持续刷新；轻量档最省资源。",
+                        "After the intro, the frame freezes with no continuous redraw; Light uses the least power."
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 7)
             }
@@ -196,6 +251,9 @@ private struct PetSettingsTab: View {
     let onChoosePetImage: () -> Void
     let onRestoreDefaultPet: () -> Void
     let onPetSizeChange: (CGFloat) -> Void
+    let onImportPetRig: () -> Void
+    let onRestoreDefaultRig: () -> Void
+    let onRevealPetRig: () -> Void
 
     @AppStorage("BoomPet.petAutoRoam") private var petAutoRoam = true
     @AppStorage("BoomPet.petDialogueEnabled") private var petDialogueEnabled = true
@@ -203,6 +261,7 @@ private struct PetSettingsTab: View {
     @ObservedObject private var dialogueStore = PetDialogueStore.shared
     @State private var dialogueEvent: PetInteractionEvent = .hover
     @State private var editingChineseDialogue = true
+    @State private var showUnavailablePetImageControls = false
 
     var body: some View {
         ScrollView {
@@ -233,23 +292,65 @@ private struct PetSettingsTab: View {
                         }
                         HStack {
                             Text(language.text(
-                                "拖到屏幕边缘会显示固定爪印。",
-                                "Drop at a screen edge to show a paw icon."
+                                "手动拖到左右边缘会显示固定爪印；上下边缘不会隐藏。",
+                                "Drop at the left or right edge to show a paw; top and bottom stay visible."
                             ))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             Spacer()
+                            if showUnavailablePetImageControls {
+                                Button(
+                                    language.text("恢复宠物", "Restore Pet"),
+                                    action: onRestoreDefaultPet
+                                )
+                                Button(
+                                    language.text(
+                                        "选择图片…",
+                                        "Choose Image…"
+                                    ),
+                                    action: onChoosePetImage
+                                )
+                            }
+                        }
+                    }
+                    .padding(.vertical, 7)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    showUnavailablePetImageControls.toggle()
+                }
+
+                GroupBox(language.text(
+                    "骨骼、动作与路线配置",
+                    "Rig, Animation & Route Configuration"
+                )) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(language.text(
+                            "导入包含 pet-rig.json 和透明 PNG 部件的文件夹。四足、头部、双耳、层级、关键帧、朝向、速度和运行轨迹均由配置驱动。",
+                            "Import a folder containing pet-rig.json and transparent PNG parts. Legs, head, ears, hierarchy, keyframes, direction, speed, and routes are all configuration-driven."
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        HStack {
+                            Button(action: onImportPetRig) {
+                                Label(
+                                    language.text("导入动作包…", "Import Rig…"),
+                                    systemImage: "square.and.arrow.down"
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
                             Button(
-                                language.text("恢复默认宠物", "Restore Default"),
-                                action: onRestoreDefaultPet
+                                language.text("查看当前配置", "Reveal Current Config"),
+                                action: onRevealPetRig
                             )
                             Button(
-                                language.text(
-                                    "选择图片并自动抠图…",
-                                    "Choose & Auto-Cutout…"
-                                ),
-                                action: onChoosePetImage
+                                language.text("恢复内置动作包", "Restore Built-in Rig"),
+                                action: onRestoreDefaultRig
                             )
+                            Spacer()
+                            Text("pet-rig.json · v1")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 7)

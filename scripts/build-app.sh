@@ -23,16 +23,28 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
+if [[ "$APP_DIR" != "$PROJECT_DIR/dist/BoomPet.app" ]]; then
+    echo "Refusing to clean unexpected app path: $APP_DIR" >&2
+    exit 1
+fi
+rm -rf -- "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 lipo -create \
     "$X86_BUILD_DIR/x86_64-apple-macosx/release/BoomPet" \
     "$ARM_BUILD_DIR/arm64-apple-macosx/release/BoomPet" \
     -output "$MACOS_DIR/BoomPet"
 cp "$PROJECT_DIR/Sources/BoomPet/Resources/pet.png" "$RESOURCES_DIR/pet.png"
-for PET_PART in body head ear-left ear-right eyes mouth paws tail; do
+RIG_RESOURCES_DIR="$RESOURCES_DIR/DefaultPetRig"
+mkdir -p "$RIG_RESOURCES_DIR"
+cp \
+    "$PROJECT_DIR/Sources/BoomPet/Resources/DefaultPetRig/pet-rig.json" \
+    "$RIG_RESOURCES_DIR/pet-rig.json"
+for RIG_PART in \
+    body head ear-left ear-right eyes mouth shadow tail \
+    leg-front-left leg-front-right leg-rear-left leg-rear-right; do
     cp \
-        "$PROJECT_DIR/Sources/BoomPet/Resources/pet-$PET_PART.png" \
-        "$RESOURCES_DIR/pet-$PET_PART.png"
+        "$PROJECT_DIR/Sources/BoomPet/Resources/DefaultPetRig/$RIG_PART.png" \
+        "$RIG_RESOURCES_DIR/$RIG_PART.png"
 done
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST

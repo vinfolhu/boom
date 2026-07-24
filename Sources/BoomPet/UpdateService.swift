@@ -93,12 +93,14 @@ final class UpdateService {
             return .upToDate(latestVersion: latest)
         }
         let preferredAsset = release.assets.first {
+            $0.name.lowercased() == "boompet-macos-universal.dmg"
+        } ?? release.assets.first {
             $0.name.lowercased() == "boompet-macos-universal.zip"
         } ?? release.assets.first {
             let name = $0.name.lowercased()
             return name.contains("boompet")
                 && name.contains("mac")
-                && name.hasSuffix(".zip")
+                && (name.hasSuffix(".dmg") || name.hasSuffix(".zip"))
         }
         return .updateAvailable(
             AppUpdateInfo(

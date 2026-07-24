@@ -34,20 +34,11 @@ jobs:
       - name: Run self-tests
         run: swift run BoomPet --self-test
 
-      - name: Build universal app
+      - name: Build universal app and installers
         env:
           BOOMPET_VERSION: ${{ steps.version.outputs.value }}
           BOOMPET_BUILD_NUMBER: ${{ github.run_number }}
-        run: ./scripts/build-app.sh
-
-      - name: Create release archive
-        shell: bash
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            dist/BoomPet.app \
-            dist/BoomPet-macOS-universal.zip
-          shasum -a 256 dist/BoomPet-macOS-universal.zip \
-            > dist/BoomPet-macOS-universal.zip.sha256
+        run: ./scripts/package-release.sh
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -56,6 +47,8 @@ jobs:
           path: |
             dist/BoomPet-macOS-universal.zip
             dist/BoomPet-macOS-universal.zip.sha256
+            dist/BoomPet-macOS-universal.dmg
+            dist/BoomPet-macOS-universal.dmg.sha256
 
       - name: Publish GitHub Release
         if: github.ref_type == 'tag'
@@ -65,6 +58,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/BoomPet-macOS-universal.zip \
             dist/BoomPet-macOS-universal.zip.sha256 \
+            dist/BoomPet-macOS-universal.dmg \
+            dist/BoomPet-macOS-universal.dmg.sha256 \
             --title "BoomPet $GITHUB_REF_NAME" \
             --generate-notes \
             --verify-tag

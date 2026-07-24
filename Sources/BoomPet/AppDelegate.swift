@@ -28,7 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: [
             "BoomPet.petAutoRoam": true,
             "BoomPet.petDialogueEnabled": true,
-            "BoomPet.petSize": 154.0
+            "BoomPet.petSize": 154.0,
+            BoomPreferences.autoCloseKey: true,
+            BoomPreferences.autoCloseSecondsKey: 4.5,
+            BoomPreferences.effectLevelKey: BoomEffectLevel.balanced.rawValue
         ])
 
         scheduler = ReminderScheduler(store: reminderStore) { [weak self] reminder in
@@ -110,6 +113,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onPetSizeChange: { [weak self] size in
                 self?.petController?.updateSize(size)
             },
+            onImportPetRig: { [weak self] in
+                self?.importPetRig()
+            },
+            onRestoreDefaultRig: { [weak self] in
+                PetRigStore.restoreDefault()
+                self?.petController?.reloadRig()
+            },
+            onRevealPetRig: {
+                PetRigStore.revealActiveDirectory()
+            },
             onStartOCR: { [weak self] in self?.ocrCoordinator.startOCR() },
             onStartSticky: { [weak self] in
                 self?.ocrCoordinator.startStickyCapture()
@@ -128,6 +141,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    private func importPetRig() {
+        switch PetRigStore.importRig() {
+        case .success:
+            petController?.reloadRig()
+        case .failure(let error):
+            let alert = NSAlert(error: error)
+            alert.messageText = languageStore.text(
+                "无法导入宠物动作包",
+                "Unable to Import Pet Rig"
+            )
+            alert.runModal()
+        }
     }
 
     private func scheduleAutomaticUpdateCheck() {
@@ -217,8 +244,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         if update.downloadURL != nil {
             alert.informativeText = languageStore.text(
-                "点击“下载更新”会直接下载 \(update.assetName ?? "BoomPet.zip")。下载后退出 BoomPet，并用新版替换旧应用。",
-                "Download \(update.assetName ?? "BoomPet.zip"), quit BoomPet, then replace the old app with the new one."
+                "点击“下载更新”会直接下载 \(update.assetName ?? "BoomPet.dmg")。下载后打开安装包，将 BoomPet 拖入“应用程序”并替换旧版本。",
+                "Download \(update.assetName ?? "BoomPet.dmg"), open it, then drag BoomPet into Applications and replace the old version."
             )
             alert.addButton(withTitle: languageStore.text("下载更新", "Download Update"))
             alert.addButton(withTitle: languageStore.text("版本说明", "Release Notes"))

@@ -11,11 +11,14 @@ BoomPet 会把宠物保持在鼠标所在的显示器与桌面空间中。你可
 - 原生 Swift、SwiftUI 与 AppKit 实现，无 Electron 运行时
 - 支持 Intel 与 Apple Silicon
 - 支持多显示器、多个 Space 及全屏应用
-- 宠物可拖拽、记忆位置并进行小范围自动活动
+- 宠物可拖拽、记忆位置，并在鼠标所在屏幕连续自主巡游
 - 拖到屏幕边缘后，宠物会收起并显示固定爪印图标
 - 悬停、点击、拖拽、发呆和游走时会出现淘气的思考气泡
 - 内置宠物采用身体、头、耳、眼、嘴、前爪和尾巴分层动画
-- 静止约 2 FPS、移动最高 12 FPS，不可见时暂停刷新以降低 CPU 占用
+- 新版骨骼动作包将四只脚、头部、双耳、眼睛、嘴、身体和尾巴完全分离
+- `pet-rig.json` 可配置父子层级、锚点、关键帧、朝向、动作速度和巡游路线
+- 支持导入用户动作包；内置动作包就是一套可复制修改的完整示例
+- 静止约 2 FPS、移动窗口约 20 FPS、肢体动画最高 15 FPS，不可见时暂停刷新
 - 宠物尺寸可在设置中按 `80–260 px` 调整
 - 互动台词可按六种场景分别配置中文与英文，每行一句
 - 内置本地心情与行为引擎，无需联网或 API Key
@@ -23,7 +26,8 @@ BoomPet 会把宠物保持在鼠标所在的显示器与桌面空间中。你可
 - 提醒严格对齐整分钟的 `00` 秒，连续运行不会逐次漂移
 - 每个任务可启用、停用、删除或立即预览 BOOM
 - 双击任务标题即可修改提醒内容
-- 漫画式全屏 BOOM、冲击波、粒子及提醒文字
+- 漫画式全屏 BOOM、冲击波、粒子、星芒及提醒文字
+- BOOM 支持自动关闭时间和轻量/标准/闪亮三档，开场结束后停止持续重绘
 - 支持导入 PNG、JPG、GIF 与 WebP 宠物图片
 - 导入时自动去除边缘纯色背景并裁切透明空白
 - 支持跟随系统、中文和 English
@@ -71,6 +75,25 @@ swift run BoomPet
 dist/BoomPet.app
 ```
 
+需要生成可上传到 GitHub Releases 的安装包时，先修改 `VERSION`，然后运行：
+
+```bash
+./scripts/package-release.sh
+```
+
+生成结果：
+
+```text
+dist/BoomPet-macOS-universal.dmg
+dist/BoomPet-macOS-universal.dmg.sha256
+dist/BoomPet-macOS-universal.zip
+dist/BoomPet-macOS-universal.zip.sha256
+```
+
+`.dmg` 内包含 BoomPet 和“应用程序”快捷方式，适合普通用户拖拽安装；`.zip`
+供程序自动更新或备用下载。脚本和 GitHub Actions 使用同一套打包流程，并从
+`VERSION` 读取版本号。
+
 脚本使用本地临时签名，适合开发和本机运行。面向其他用户正式发布时，需要使用 Apple Developer ID 签名并完成 Apple 公证。
 
 构建产物不应提交到 Git，请通过 GitHub Releases 发布压缩后的应用。
@@ -90,9 +113,11 @@ dist/BoomPet.app
 ### 移动宠物
 
 - 直接拖拽宠物可以改变位置。
-- 拖到屏幕任意边缘后，宠物会收起并显示固定爪印图标。
+- 只有手动拖到屏幕左、右边缘时，宠物才会收起并显示固定爪印图标。
+- 上、下边缘不会隐藏；自主巡游也会避开边缘安全区。
+- 鼠标移到宠物身上会立刻暂停，移开后再继续巡游。
 - 点击或拖动爪印图标即可恢复完整宠物。
-- 在设置中可以关闭宠物的自动小范围活动。
+- 在设置中可以关闭宠物的全屏自主巡游。
 - “淘气气泡互动”可以单独关闭。
 
 ### 使用自定义宠物
@@ -100,6 +125,11 @@ dist/BoomPet.app
 在设置中选择“选择图片并自动抠图…”。
 
 导入过程完全在本机完成。透明 PNG 或背景接近纯色的图片效果最好。复杂照片背景目前只能进行边缘背景识别，无法替代专业 AI 抠图工具。GIF 当前作为静态宠物图片显示。
+
+需要真正的四足动作时，请在“宠物 → 骨骼、动作与路线配置”中导入包含
+`pet-rig.json` 和透明 PNG 部件的文件夹。格式、字段和预览方法参见
+[骨骼动作包格式](docs/pet-rig-format.md)。内置示例位于
+[`DefaultPetRig`](Sources/BoomPet/Resources/DefaultPetRig)。
 
 ### 切换语言
 
@@ -133,7 +163,7 @@ BoomPet 使用公开的 GitHub Releases API：
 https://api.github.com/repos/vinfolhu/boom/releases/latest
 ```
 
-应用启动约 5 秒后检查一次，此后最多每天自动检查一次。检测到更高的正式版本时，宠物会用气泡提醒；右键宠物选择“检查更新…”，或者点击历史窗口的“检查更新”，即可直接下载 Release 中名为 `BoomPet-macOS-universal.zip` 的资源。若 Release 没有这个文件，则打开对应版本页面。
+应用启动约 5 秒后检查一次，此后最多每天自动检查一次。检测到更高的正式版本时，宠物会用气泡提醒；右键宠物选择“检查更新…”，或者点击历史窗口的“检查更新”，即可优先下载 Release 中的 `BoomPet-macOS-universal.dmg`，没有 DMG 时回退到同名 ZIP。若两者都不存在，则打开对应版本页面。
 
 仓库已经包含 [release.yml](.github/workflows/release.yml)。发布步骤：
 
@@ -152,11 +182,15 @@ git push origin v0.2.0
 
 1. 执行 BoomPet 自检。
 2. 分别构建 `x86_64` 与 `arm64`。
-3. 合并通用应用并生成 ZIP。
-4. 生成 SHA-256 校验文件。
-5. 创建 GitHub Release 并上传两个文件。
+3. 合并 Universal 应用。
+4. 生成 DMG 安装盘、ZIP 备用包及 SHA-256 校验文件。
+5. 创建 GitHub Release 并上传四个二进制资产。
 
 也可以在 GitHub 的 Actions 页面手动运行工作流。手动运行只生成可下载的 Actions Artifact，不自动创建 Release。
+
+GitHub 会在每个 Release 下自动附带 `Source code (zip)` 和
+`Source code (tar.gz)`，这两个源码归档无法关闭。用户应下载我们上传的
+`BoomPet-macOS-universal.dmg`，而不是 GitHub 自动生成的 Source code。
 
 如果发布步骤提示 `Resource not accessible by integration`，请进入仓库：
 
@@ -170,7 +204,7 @@ Settings → Actions → General → Workflow permissions
 
 桌面应用请选择 **Releases**。GitHub Packages 面向 npm、Maven、NuGet、RubyGems 和容器等包管理器，不提供通用的 macOS `.app` 分发格式。
 
-当前脚本使用 ad-hoc 签名，适合开发测试。正式公开发布应配置 Apple Developer ID 签名与 notarization。完成正式签名之前，BoomPet 只负责直接下载 ZIP，不会静默替换正在运行的应用；用户需要退出旧版本并手动替换。
+当前脚本使用 ad-hoc 签名，适合开发测试。正式公开发布应配置 Apple Developer ID 签名与 notarization。完成正式签名之前，BoomPet 只负责下载 DMG/ZIP，不会静默替换正在运行的应用；用户需要退出旧版本并手动替换。
 
 首次使用框选功能时，请在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 BoomPet，然后重新启动应用。
 

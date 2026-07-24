@@ -1,6 +1,79 @@
 import AppKit
 import Foundation
 
+func renderRigPreview(to outputURL: URL) -> Int32 {
+    guard let directory = PetRigStore.activeDirectory,
+          let rig = try? PetRigRuntime(directory: directory) else {
+        fputs("Unable to load the active pet rig.\n", stderr)
+        return 1
+    }
+    let animations = ["idle", "walk", "run", "crawl"]
+    let phases: [CGFloat] = [0, 0.25, 0.5, 0.75]
+    let cellSize = NSSize(width: 190, height: 190)
+    let image = NSImage(size: NSSize(
+        width: cellSize.width * CGFloat(animations.count),
+        height: cellSize.height * CGFloat(phases.count)
+    ))
+    image.lockFocus()
+    NSColor(calibratedWhite: 0.94, alpha: 1).setFill()
+    NSRect(origin: .zero, size: image.size).fill()
+
+    for (column, name) in animations.enumerated() {
+        let duration = rig.manifest.animations[name]?.duration ?? 1
+        for (row, phase) in phases.enumerated() {
+            let rect = NSRect(
+                x: CGFloat(column) * cellSize.width + 10,
+                y: CGFloat(phases.count - row - 1) * cellSize.height + 10,
+                width: cellSize.width - 20,
+                height: cellSize.height - 20
+            )
+            rig.draw(
+                animation: name,
+                elapsed: duration * Double(phase),
+                in: rect,
+                facingRight: true
+            )
+            if row == 0 {
+                let label = NSAttributedString(
+                    string: name,
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+                        .foregroundColor: NSColor.black
+                    ]
+                )
+                label.draw(at: NSPoint(
+                    x: CGFloat(column) * cellSize.width + 8,
+                    y: image.size.height - 20
+                ))
+            }
+        }
+    }
+    image.unlockFocus()
+
+    guard let cgImage = image.cgImage(
+        forProposedRect: nil,
+        context: nil,
+        hints: nil
+    ) else {
+        return 1
+    }
+    let representation = NSBitmapImageRep(cgImage: cgImage)
+    guard let png = representation.representation(
+        using: .png,
+        properties: [:]
+    ) else {
+        return 1
+    }
+    do {
+        try png.write(to: outputURL, options: .atomic)
+        print(outputURL.path)
+        return 0
+    } catch {
+        fputs("\(error.localizedDescription)\n", stderr)
+        return 1
+    }
+}
+
 func runSelfTests() -> Int32 {
     let testKey = "BoomPet.self-test.\(UUID().uuidString)"
     defer {
@@ -102,6 +175,26 @@ func runSelfTests() -> Int32 {
         return 1
     }
 
+    guard let rigDirectory = PetRigStore.bundledDirectory,
+          let rig = try? PetRigRuntime(directory: rigDirectory) else {
+        fputs("FAIL: 内置宠物骨骼动作包无法加载\n", stderr)
+        return 1
+    }
+    let requiredParts: Set<String> = [
+        "body", "head", "earLeft", "earRight",
+        "legFrontLeft", "legFrontRight", "legRearLeft", "legRearRight"
+    ]
+    let configuredParts = Set(rig.manifest.parts.map(\.id))
+    guard requiredParts.isSubset(of: configuredParts),
+          ["idle", "walk", "run", "crawl"].allSatisfy({
+              rig.manifest.animations[$0] != nil
+          }),
+          rig.manifest.direction.mirrorWithMovement,
+          rig.manifest.movement.runSpeed > rig.manifest.movement.crawlSpeed else {
+        fputs("FAIL: 四足、动作、方向或路线配置不完整\n", stderr)
+        return 1
+    }
+
     let textImage = NSImage(size: NSSize(width: 520, height: 140))
     textImage.lockFocus()
     NSColor.white.setFill()
@@ -127,7 +220,7 @@ func runSelfTests() -> Int32 {
     }
 
     print(
-        "PASS: 提醒调度、标题修改、自动抠图、本地行为引擎、语言检测、版本比较、Vision OCR"
+        "PASS: 提醒调度、标题修改、自动抠图、本地行为引擎、可配置四足骨骼、语言检测、版本比较、Vision OCR"
     )
     return 0
 }

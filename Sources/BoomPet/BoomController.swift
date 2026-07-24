@@ -30,6 +30,9 @@ final class BoomController {
         view.message = message
         view.headline = headline
         view.petImage = AssetLoader.petImage()
+        view.autoClose = BoomPreferences.autoClose
+        view.autoCloseDelay = BoomPreferences.autoCloseSeconds
+        view.effectLevel = BoomPreferences.effectLevel
         view.onFinished = { [weak self, weak panel] in
             panel?.orderOut(nil)
             panel?.close()
@@ -91,10 +94,14 @@ final class BoomView: NSView {
     var headline = "BOOM时间到。"
     var petImage = NSImage()
     var onFinished: (() -> Void)?
+    var autoClose = true
+    var autoCloseDelay: TimeInterval = 4.5
+    var effectLevel = BoomEffectLevel.balanced
 
     private var displayTimer: Timer?
+    private var finishWorkItem: DispatchWorkItem?
     private var startTime: CFTimeInterval = 0
-    private let duration: CFTimeInterval = 4.6
+    private var didDrawFinalFrame = false
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -109,15 +116,30 @@ final class BoomView: NSView {
 
     deinit {
         displayTimer?.invalidate()
+        finishWorkItem?.cancel()
     }
 
     func start() {
         startTime = CACurrentMediaTime()
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+        let timer = Timer(
+            timeInterval: 1.0 / effectLevel.framesPerSecond,
+            repeats: true
+        ) { [weak self] _ in
             self?.updateFrame()
         }
         displayTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+
+        if autoClose {
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.finish()
+            }
+            finishWorkItem = workItem
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + max(autoCloseDelay, effectLevel.animationDuration),
+                execute: workItem
+            )
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -126,7 +148,10 @@ final class BoomView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let elapsed = CACurrentMediaTime() - startTime
+        let elapsed = min(
+            CACurrentMediaTime() - startTime,
+            effectLevel.animationDuration
+        )
         let impactProgress = max(0, min(1, CGFloat((elapsed - 0.52) / 0.55)))
         let shakeStrength = max(0, 1 - impactProgress) * 18
         let center = CGPoint(
@@ -137,6 +162,7 @@ final class BoomView: NSView {
         drawBackdrop(elapsed: elapsed)
         drawComicRays(center: center, elapsed: elapsed)
         drawExplosion(center: center, elapsed: elapsed)
+        drawSparkles(center: center, elapsed: elapsed)
         drawPet(center: center, elapsed: elapsed)
         drawText(center: center, elapsed: elapsed)
         drawDismissHint()
@@ -144,7 +170,7 @@ final class BoomView: NSView {
 
     private func drawBackdrop(elapsed: CFTimeInterval) {
         let fadeIn = min(1, CGFloat(elapsed / 0.22))
-        let fadeOut = elapsed > 4.0 ? max(0, CGFloat((duration - elapsed) / 0.6)) : 1
+        let fadeOut: CGFloat = 1
         NSColor(
             calibratedRed: 0.035,
             green: 0.018,
@@ -171,8 +197,9 @@ final class BoomView: NSView {
         let outerRadius = hypot(bounds.width, bounds.height) * 0.65
         let innerRadius = 105 + progress * 62
 
-        for index in 0..<28 {
-            let baseAngle = CGFloat(index) / 28 * .pi * 2
+        let rayCount = effectLevel.rayCount
+        for index in 0..<rayCount {
+            let baseAngle = CGFloat(index) / CGFloat(rayCount) * .pi * 2
             let halfWidth: CGFloat = index.isMultiple(of: 3) ? 0.045 : 0.022
             let path = NSBezierPath()
             path.move(to: CGPoint(
@@ -213,8 +240,10 @@ final class BoomView: NSView {
             oval.stroke()
         }
 
-        for index in 0..<34 {
-            let angle = CGFloat(index) / 34 * .pi * 2 + CGFloat(index % 5) * 0.08
+        let particleCount = effectLevel.particleCount
+        for index in 0..<particleCount {
+            let angle = CGFloat(index) / CGFloat(particleCount) * .pi * 2
+                + CGFloat(index % 5) * 0.08
             let distance = eased * min(bounds.width, bounds.height) * 0.48
             let particleRadius = 7 + CGFloat(index % 5) * 5
             let point = CGPoint(
@@ -259,6 +288,36 @@ final class BoomView: NSView {
             width: innerRadius * 2,
             height: innerRadius * 2
         )).fill()
+    }
+
+    private func drawSparkles(center: CGPoint, elapsed: CFTimeInterval) {
+        guard effectLevel == .sparkle, elapsed > 0.68 else { return }
+        let progress = min(1, CGFloat((elapsed - 0.68) / 0.9))
+        let radius = min(bounds.width, bounds.height) * 0.42
+        for index in 0..<14 {
+            let angle = CGFloat(index) / 14 * .pi * 2 + 0.17
+            let orbit = radius * (0.42 + CGFloat(index % 4) * 0.16)
+            let pulse = 0.45 + 0.55 * abs(
+                sin(CGFloat(elapsed) * 7 + CGFloat(index) * 1.7)
+            )
+            let size = (5 + CGFloat(index % 3) * 3) * pulse * progress
+            let point = CGPoint(
+                x: center.x + cos(angle) * orbit,
+                y: center.y + sin(angle) * orbit
+            )
+            let path = NSBezierPath()
+            path.move(to: CGPoint(x: point.x, y: point.y + size))
+            path.line(to: CGPoint(x: point.x + size * 0.28, y: point.y + size * 0.28))
+            path.line(to: CGPoint(x: point.x + size, y: point.y))
+            path.line(to: CGPoint(x: point.x + size * 0.28, y: point.y - size * 0.28))
+            path.line(to: CGPoint(x: point.x, y: point.y - size))
+            path.line(to: CGPoint(x: point.x - size * 0.28, y: point.y - size * 0.28))
+            path.line(to: CGPoint(x: point.x - size, y: point.y))
+            path.line(to: CGPoint(x: point.x - size * 0.28, y: point.y + size * 0.28))
+            path.close()
+            NSColor.white.withAlphaComponent(0.82 * pulse).setFill()
+            path.fill()
+        }
     }
 
     private func drawPet(center: CGPoint, elapsed: CFTimeInterval) {
@@ -346,14 +405,21 @@ final class BoomView: NSView {
 
     private func updateFrame() {
         let elapsed = CACurrentMediaTime() - startTime
-        if elapsed >= duration {
-            finish()
+        if elapsed >= effectLevel.animationDuration {
+            if !didDrawFinalFrame {
+                didDrawFinalFrame = true
+                needsDisplay = true
+            }
+            displayTimer?.invalidate()
+            displayTimer = nil
         } else {
             needsDisplay = true
         }
     }
 
     private func finish() {
+        finishWorkItem?.cancel()
+        finishWorkItem = nil
         displayTimer?.invalidate()
         displayTimer = nil
         onFinished?()

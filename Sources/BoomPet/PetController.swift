@@ -8,6 +8,13 @@ enum PetDockEdge: String {
     case bottom
 }
 
+enum PetMotionStyle {
+    case idle
+    case walk
+    case run
+    case crawl
+}
+
 final class PetController {
     private let panel: PetPanel
     private let petView: PetView
@@ -19,6 +26,13 @@ final class PetController {
     private var idleTimer: Timer?
     private var currentScreenNumber: NSNumber?
     private var isDragging = false
+    private var isRoaming = false
+    private var isHovering = false
+    private var roamStartOrigin = NSPoint.zero
+    private var roamTargetOrigin = NSPoint.zero
+    private var roamStartTime: CFTimeInterval = 0
+    private var roamDuration: CFTimeInterval = 0
+    private var roamFacingRight = true
     private var isTemporarilyHidden = false
     private var dockEdge: PetDockEdge?
 
@@ -61,18 +75,27 @@ final class PetController {
         petView.onDragStateChanged = { [weak self] dragging in
             self?.isDragging = dragging
             if dragging {
+                self?.cancelRoam()
                 self?.showInteraction(.drag, bypassCooldown: true)
                 self?.leaveDockForDragging()
             }
         }
         petView.onDragEnded = { [weak self] in
             self?.saveCurrentPosition()
+            self?.scheduleNextRoam(after: 1.2)
         }
         petView.onDragMoved = { [weak self] in
             self?.repositionBubble()
         }
         petView.onHover = { [weak self] in
+            self?.isHovering = true
+            self?.cancelRoam()
             self?.showInteraction(.hover)
+        }
+        petView.onHoverEnded = { [weak self] in
+            guard let self else { return }
+            isHovering = false
+            scheduleNextRoam(after: 1.4)
         }
         petView.onTapped = { [weak self] in
             guard let self else { return }
@@ -85,6 +108,10 @@ final class PetController {
         panel.contentView = petView
         if let rawEdge = UserDefaults.standard.string(forKey: dockEdgeKey) {
             dockEdge = PetDockEdge(rawValue: rawEdge)
+            if dockEdge == .top || dockEdge == .bottom {
+                dockEdge = nil
+                UserDefaults.standard.removeObject(forKey: dockEdgeKey)
+            }
             petView.peekEdge = dockEdge
         }
     }
@@ -100,13 +127,7 @@ final class PetController {
         }
         RunLoop.main.add(trackingTimer!, forMode: .common)
 
-        roamTimer = Timer.scheduledTimer(
-            withTimeInterval: 3.2,
-            repeats: true
-        ) { [weak self] _ in
-            self?.performSmallRoam()
-        }
-        RunLoop.main.add(roamTimer!, forMode: .common)
+        scheduleNextRoam(after: 1.2)
 
         idleTimer = Timer.scheduledTimer(
             withTimeInterval: 11,
@@ -130,6 +151,10 @@ final class PetController {
 
     func reloadImage() {
         petView.reloadArtwork()
+    }
+
+    func reloadRig() {
+        petView.reloadRig()
     }
 
     func updateSize(_ requestedSize: CGFloat) {
@@ -169,7 +194,12 @@ final class PetController {
     }
 
     private func moveToMouseScreen(force: Bool = false) {
-        guard !isDragging, !isTemporarilyHidden else { return }
+        guard !isDragging,
+              !isRoaming,
+              !isHovering,
+              !isTemporarilyHidden else {
+            return
+        }
         let mouseLocation = NSEvent.mouseLocation
         guard let screen = screen(at: mouseLocation) else {
             return
@@ -183,53 +213,168 @@ final class PetController {
         panel.orderFrontRegardless()
     }
 
-    private func performSmallRoam() {
+    private func scheduleNextRoam(after delay: TimeInterval? = nil) {
+        roamTimer?.invalidate()
+        let movement = petView.movementProfile
+        let minimumPause = max(0.2, movement.pauseMinimum)
+        let maximumPause = max(minimumPause, movement.pauseMaximum)
+        let timer = Timer(
+            timeInterval: delay ?? Double.random(
+                in: minimumPause...maximumPause
+            ),
+            repeats: false
+        ) { [weak self] _ in
+            self?.performFullScreenRoam()
+        }
+        roamTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func performFullScreenRoam() {
         guard !isDragging,
+              !isHovering,
               dockEdge == nil,
               UserDefaults.standard.bool(forKey: autoRoamKey),
               let screen = screen(at: NSEvent.mouseLocation) else {
+            scheduleNextRoam(after: 2.0)
             return
         }
 
         let current = panel.frame.origin
-        let available = screen.visibleFrame.insetBy(dx: 18, dy: 18)
-        let target: NSPoint
-        if behaviorEngine.shouldStartLongRoam || Int.random(in: 0..<100) < 72 {
-            target = clampedOrigin(
-                NSPoint(
-                    x: CGFloat.random(
-                        in: available.minX...(available.maxX - panel.frame.width)
+        let movement = petView.movementProfile
+        let horizontalMargin = max(
+            42,
+            panel.frame.width * movement.horizontalMargin
+        )
+        let verticalMargin = max(
+            30,
+            panel.frame.height * movement.verticalMargin
+        )
+        let available = screen.visibleFrame.insetBy(
+            dx: horizontalMargin,
+            dy: verticalMargin
+        )
+        let usableWidth = max(1, available.width - panel.frame.width)
+        var target = current
+        let desiredHorizontalDistance = available.width * 0.36
+        let maximumVerticalShift = max(0, movement.maxVerticalShift)
+        for _ in 0..<8 {
+            let targetY = min(
+                max(
+                    current.y + CGFloat.random(
+                        in: -maximumVerticalShift...maximumVerticalShift
                     ),
-                    y: CGFloat.random(
-                        in: available.minY...(available.maxY - panel.frame.height)
-                    )
+                    available.minY
                 ),
-                in: screen
+                available.maxY - panel.frame.height
             )
-        } else {
-            target = clampedOrigin(
+            let candidate = clampedOrigin(
                 NSPoint(
-                    x: current.x + CGFloat.random(in: -180...180),
-                    y: current.y + CGFloat.random(in: -85...85)
+                    x: available.minX + CGFloat.random(in: 0...usableWidth),
+                    y: targetY
                 ),
-                in: screen
+                in: screen,
+                marginX: horizontalMargin,
+                marginY: verticalMargin
             )
+            target = candidate
+            if abs(candidate.x - current.x) >= desiredHorizontalDistance {
+                break
+            }
         }
 
         let distance = hypot(target.x - current.x, target.y - current.y)
-        petView.setMoving(true, facingRight: target.x >= current.x)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = min(2.75, max(0.8, Double(distance / 230)))
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrameOrigin(target)
-        } completionHandler: { [weak self] in
-            guard let self else { return }
-            petView.setMoving(false, facingRight: target.x >= current.x)
-            repositionBubble()
-            if behaviorEngine.shouldSpeakWhileRoaming {
-                showInteraction(.roam)
-            }
+        guard distance > 12 else {
+            scheduleNextRoam(after: 0.8)
+            return
         }
+        isRoaming = true
+        bubbleController.hide()
+        roamStartOrigin = current
+        roamTargetOrigin = target
+        roamStartTime = CACurrentMediaTime()
+        let style = chooseMotionStyle(
+            movement: movement,
+            prefersRun: distance > available.width * 0.48
+        )
+        let speed: CGFloat
+        switch style {
+        case .run:
+            speed = max(40, movement.runSpeed)
+        case .crawl:
+            speed = max(30, movement.crawlSpeed)
+        case .walk, .idle:
+            speed = max(35, movement.walkSpeed)
+        }
+        roamDuration = min(7.0, max(1.5, Double(distance / speed)))
+        roamFacingRight = target.x >= current.x
+        petView.setMotion(style, facingRight: roamFacingRight)
+
+        let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) {
+            [weak self] _ in self?.advanceRoam()
+        }
+        roamTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func chooseMotionStyle(
+        movement: PetRigMovement,
+        prefersRun: Bool
+    ) -> PetMotionStyle {
+        let walk = max(0, movement.walkWeight)
+        let run = max(0, movement.runWeight) + (prefersRun ? 20 : 0)
+        let crawl = max(0, movement.crawlWeight)
+        let total = walk + run + crawl
+        guard total > 0 else { return .walk }
+        let roll = Int.random(in: 0..<total)
+        if roll < run {
+            return .run
+        }
+        if roll < run + crawl {
+            return .crawl
+        }
+        return .walk
+    }
+
+    private func advanceRoam() {
+        guard isRoaming else { return }
+        let rawProgress = min(
+            1,
+            max(0, (CACurrentMediaTime() - roamStartTime) / roamDuration)
+        )
+        let progress = rawProgress < 0.5
+            ? 4 * rawProgress * rawProgress * rawProgress
+            : 1 - pow(-2 * rawProgress + 2, 3) / 2
+        panel.setFrameOrigin(NSPoint(
+            x: roamStartOrigin.x
+                + (roamTargetOrigin.x - roamStartOrigin.x) * progress,
+            y: roamStartOrigin.y
+                + (roamTargetOrigin.y - roamStartOrigin.y) * progress
+        ))
+        if rawProgress >= 1 {
+            finishRoam()
+        }
+    }
+
+    private func finishRoam() {
+        roamTimer?.invalidate()
+        roamTimer = nil
+        isRoaming = false
+        petView.setMotion(.idle, facingRight: roamFacingRight)
+        saveCurrentPosition()
+        repositionBubble()
+        if behaviorEngine.shouldSpeakWhileRoaming {
+            showInteraction(.roam)
+        }
+        scheduleNextRoam()
+    }
+
+    private func cancelRoam() {
+        guard isRoaming else { return }
+        roamTimer?.invalidate()
+        roamTimer = nil
+        isRoaming = false
+        petView.setMotion(.idle, facingRight: roamFacingRight)
     }
 
     private func saveCurrentPosition() {
@@ -239,9 +384,7 @@ final class PetController {
         let edgeThreshold: CGFloat = 30
         let distances: [(PetDockEdge, CGFloat)] = [
             (.left, abs(panel.frame.minX - frame.minX)),
-            (.right, abs(panel.frame.maxX - frame.maxX)),
-            (.bottom, abs(panel.frame.minY - frame.minY)),
-            (.top, abs(panel.frame.maxY - frame.maxY))
+            (.right, abs(panel.frame.maxX - frame.maxX))
         ]
 
         if let nearest = distances.min(by: { $0.1 < $1.1 }),
@@ -375,8 +518,13 @@ final class PetController {
         bubbleController.reposition(near: panel.frame, on: screen)
     }
 
-    private func clampedOrigin(_ origin: NSPoint, in screen: NSScreen) -> NSPoint {
-        let frame = screen.visibleFrame.insetBy(dx: 10, dy: 10)
+    private func clampedOrigin(
+        _ origin: NSPoint,
+        in screen: NSScreen,
+        marginX: CGFloat = 10,
+        marginY: CGFloat = 10
+    ) -> NSPoint {
+        let frame = screen.visibleFrame.insetBy(dx: marginX, dy: marginY)
         return NSPoint(
             x: min(max(origin.x, frame.minX), frame.maxX - panel.frame.width),
             y: min(max(origin.y, frame.minY), frame.maxY - panel.frame.height)
@@ -424,7 +572,9 @@ final class PetPanel: NSPanel {
 
 final class PetView: NSView {
     var image = NSImage()
-    private var spriteParts: [NSImage]? = AssetLoader.petSpriteParts()
+    private var rig = PetRigStore.hasCustomRig || !PetAssetStore.hasCustomImage
+        ? PetRigStore.loadActive()
+        : nil
     weak var languageStore: LanguageStore?
     var peekEdge: PetDockEdge? {
         didSet { needsDisplay = true }
@@ -439,6 +589,7 @@ final class PetView: NSView {
     var onDragEnded: (() -> Void)?
     var onDragMoved: (() -> Void)?
     var onHover: (() -> Void)?
+    var onHoverEnded: (() -> Void)?
     var onTapped: (() -> Void)?
     private var hoverArea: NSTrackingArea?
     private var dragStartMouseLocation: NSPoint?
@@ -446,13 +597,17 @@ final class PetView: NSView {
     private var didDrag = false
     private var animationTimer: Timer?
     private var lastAnimationFrame = Date.distantPast
-    private var isMoving = false
+    private var motionStyle = PetMotionStyle.idle
     private var facingRight = true
+
+    var movementProfile: PetRigMovement {
+        rig?.manifest.movement ?? .fallback
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) {
+        let timer = Timer(timeInterval: 1.0 / 15.0, repeats: true) {
             [weak self] _ in self?.animationTick()
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -469,12 +624,23 @@ final class PetView: NSView {
 
     func reloadArtwork() {
         image = AssetLoader.petImage()
-        spriteParts = AssetLoader.petSpriteParts()
+        rig = PetRigStore.hasCustomRig || !PetAssetStore.hasCustomImage
+            ? PetRigStore.loadActive()
+            : nil
+        needsDisplay = true
+    }
+
+    func reloadRig() {
+        rig = PetRigStore.loadActive()
         needsDisplay = true
     }
 
     func setMoving(_ moving: Bool, facingRight: Bool) {
-        isMoving = moving
+        setMotion(moving ? .walk : .idle, facingRight: facingRight)
+    }
+
+    func setMotion(_ style: PetMotionStyle, facingRight: Bool) {
+        motionStyle = style
         self.facingRight = facingRight
         needsDisplay = true
     }
@@ -482,7 +648,8 @@ final class PetView: NSView {
     private func animationTick() {
         guard window?.isVisible == true else { return }
         let now = Date()
-        let interval: TimeInterval = (isMoving || didDrag) ? (1.0 / 12.0) : 0.5
+        let interval: TimeInterval =
+            (motionStyle != .idle || didDrag) ? (1.0 / 15.0) : 0.5
         guard now.timeIntervalSince(lastAnimationFrame) >= interval else { return }
         lastAnimationFrame = now
         needsDisplay = true
@@ -512,17 +679,47 @@ final class PetView: NSView {
             drawDockIcon(at: peekEdge)
             return
         }
-        if let spriteParts, spriteParts.count == 8 {
-            drawAnimatedPet(parts: spriteParts)
-        } else {
-            let time = CACurrentMediaTime()
-            let bounce = sin(time * (isMoving ? 8 : 2.2)) * (isMoving ? 4 : 1.4)
-            drawTransformed(
-                image,
-                in: bounds.insetBy(dx: 3, dy: 3).offsetBy(dx: 0, dy: bounce),
-                rotation: sin(time * 2.1) * (isMoving ? 0.045 : 0.012)
+        if let rig {
+            rig.draw(
+                animation: animationName,
+                elapsed: CACurrentMediaTime(),
+                in: bounds.insetBy(dx: 2, dy: 2),
+                facingRight: facingRight
             )
+            return
         }
+        drawGroundShadow()
+        let time = CACurrentMediaTime()
+        let isMoving = motionStyle != .idle
+        let bounce = sin(time * (isMoving ? 8 : 2.2)) * (isMoving ? 4 : 1.4)
+        drawTransformed(
+            image,
+            in: bounds.insetBy(dx: 3, dy: 3).offsetBy(dx: 0, dy: bounce),
+            rotation: sin(time * 2.1) * (isMoving ? 0.045 : 0.012)
+        )
+    }
+
+    private var animationName: String {
+        switch motionStyle {
+        case .idle: return "idle"
+        case .walk: return "walk"
+        case .run: return "run"
+        case .crawl: return "crawl"
+        }
+    }
+
+    private func drawGroundShadow() {
+        let moving = motionStyle != .idle || didDrag
+        let width = bounds.width * (motionStyle == .crawl ? 0.68 : 0.56)
+        let height = max(4, bounds.height * 0.055)
+        let rect = NSRect(
+            x: bounds.midX - width / 2,
+            y: bounds.height * 0.035,
+            width: width,
+            height: height
+        )
+        NSColor.black.withAlphaComponent(moving ? 0.20 : 0.14).setFill()
+        NSBezierPath(ovalIn: rect).fill()
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -532,6 +729,7 @@ final class PetView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         animateScale(to: 1)
+        onHoverEnded?()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -675,76 +873,6 @@ final class PetView: NSView {
         animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
         layer.setValue(scale, forKeyPath: "transform.scale")
         layer.add(animation, forKey: "petScale")
-    }
-
-    private func drawAnimatedPet(parts: [NSImage]) {
-        let time = CACurrentMediaTime()
-        let cadence = isMoving ? 9.5 : 2.2
-        let step = sin(time * cadence)
-        let bounce = abs(sin(time * cadence)) * (isMoving ? 5.0 : 1.5)
-        let blink = fmod(time, 4.1) < 0.14 ? 0.12 : 1.0
-
-        NSGraphicsContext.saveGraphicsState()
-        let scale = bounds.width / 154
-        let sizeTransform = NSAffineTransform()
-        sizeTransform.scale(by: scale)
-        sizeTransform.concat()
-        if !facingRight, let context = NSGraphicsContext.current?.cgContext {
-            context.translateBy(x: 154, y: 0)
-            context.scaleBy(x: -1, y: 1)
-        }
-
-        drawTransformed(
-            parts[7],
-            in: NSRect(x: 99, y: 16 + bounce * 0.3, width: 49, height: 84),
-            rotation: step * (isMoving ? 0.30 : 0.16),
-            anchor: NSPoint(x: 0.2, y: 0.2)
-        )
-        drawTransformed(
-            parts[0],
-            in: NSRect(x: 17, y: 4 + bounce, width: 91, height: 81),
-            rotation: step * (isMoving ? 0.025 : 0.008)
-        )
-        drawTransformed(
-            parts[2],
-            in: NSRect(x: 24, y: 105 + bounce, width: 34, height: 43),
-            rotation: -0.08 + step * 0.08,
-            anchor: NSPoint(x: 0.7, y: 0.1)
-        )
-        drawTransformed(
-            parts[3],
-            in: NSRect(x: 101, y: 105 + bounce, width: 35, height: 43),
-            rotation: 0.08 - step * 0.08,
-            anchor: NSPoint(x: 0.3, y: 0.1)
-        )
-        let headBob = bounce + sin(time * 2.6) * 1.2
-        drawTransformed(
-            parts[1],
-            in: NSRect(x: 27, y: 51 + headBob, width: 105, height: 91),
-            rotation: step * (isMoving ? 0.035 : 0.012)
-        )
-        drawTransformed(
-            parts[4],
-            in: NSRect(x: 45, y: 83 + headBob, width: 67, height: 29),
-            scaleY: blink
-        )
-        drawTransformed(
-            parts[5],
-            in: NSRect(x: 65, y: 68 + headBob, width: 28, height: 20),
-            scaleY: 0.88 + abs(step) * (isMoving ? 0.25 : 0.08)
-        )
-        drawTransformed(
-            parts[6],
-            in: NSRect(
-                x: 43 + step * (isMoving ? 2 : 0.4),
-                y: 25 + bounce,
-                width: 64,
-                height: 51
-            ),
-            rotation: step * (isMoving ? 0.07 : 0.015)
-        )
-
-        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawTransformed(
