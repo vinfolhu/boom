@@ -1,0 +1,61 @@
+# Swift Package Manager
+.build/
+.build-*/
+.swiftpm/
+Packages/
+
+# Packaged applications and release artifacts
+dist/
+*.app
+*.dSYM
+*.dSYM.zip
+*.ipa
+*.pkg
+*.zip
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.xcarchive
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs, crash reports, and temporary files
+*.log
+*.crash
+*.tmp
+tmp/
+.tmp/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.cer
+*.crt
+*.key
+*.pem
+*.mobileprovision
+
+# Generated intermediate image; keep the processed pet.png
+Sources/BoomPet/Resources/pet-chroma.png
