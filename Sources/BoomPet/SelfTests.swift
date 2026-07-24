@@ -70,6 +70,25 @@ func runSelfTests() -> Int32 {
         return 1
     }
 
-    print("PASS: 无默认任务、整分钟触发、周期无漂移、标题可修改、自动抠图")
+    let language = LanguageStore()
+    let behavior = PetBehaviorEngine()
+    guard behavior.message(
+        for: .hover,
+        language: language,
+        bypassCooldown: true
+    ) != nil,
+    behavior.message(for: .tap, language: language) == nil,
+    behavior.message(
+        for: .drag,
+        language: language,
+        bypassCooldown: true
+    ) != nil else {
+        fputs("FAIL: 宠物行为台词或冷却时间异常\n", stderr)
+        return 1
+    }
+
+    print(
+        "PASS: 无默认任务、整分钟触发、周期无漂移、标题可修改、自动抠图、本地行为引擎"
+    )
     return 0
 }

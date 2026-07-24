@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var title = ""
     @State private var intervalMinutes = 30
     @AppStorage("BoomPet.petAutoRoam") private var petAutoRoam = true
+    @AppStorage("BoomPet.petDialogueEnabled") private var petDialogueEnabled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -148,23 +149,35 @@ struct SettingsView: View {
     }
 
     private var petSettings: some View {
-        HStack(spacing: 14) {
-            Toggle(
-                language.text(
-                    "宠物自动小范围活动",
-                    "Let the pet wander"
-                ),
-                isOn: $petAutoRoam
-            )
-            Spacer()
-            Button(
-                language.text("恢复默认宠物", "Restore Default"),
-                action: onRestoreDefaultPet
-            )
-            Button(
-                language.text("选择图片并自动抠图…", "Choose & Auto-Cutout…"),
-                action: onChoosePetImage
-            )
+        VStack(spacing: 10) {
+            HStack(spacing: 24) {
+                Toggle(
+                    language.text(
+                        "宠物自主活动",
+                        "Let the pet wander"
+                    ),
+                    isOn: $petAutoRoam
+                )
+                Toggle(
+                    language.text(
+                        "淘气气泡互动",
+                        "Playful speech bubbles"
+                    ),
+                    isOn: $petDialogueEnabled
+                )
+                Spacer()
+            }
+            HStack {
+                Spacer()
+                Button(
+                    language.text("恢复默认宠物", "Restore Default"),
+                    action: onRestoreDefaultPet
+                )
+                Button(
+                    language.text("选择图片并自动抠图…", "Choose & Auto-Cutout…"),
+                    action: onChoosePetImage
+                )
+            }
         }
     }
 }

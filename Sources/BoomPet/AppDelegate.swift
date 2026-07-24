@@ -11,7 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [
-            "BoomPet.petAutoRoam": true
+            "BoomPet.petAutoRoam": true,
+            "BoomPet.petDialogueEnabled": true
         ])
 
         scheduler = ReminderScheduler(store: reminderStore) { [weak self] reminder in

@@ -11,8 +11,12 @@ enum PetDockEdge: String {
 final class PetController {
     private let panel: PetPanel
     private let petView: PetView
+    private let behaviorEngine = PetBehaviorEngine()
+    private let bubbleController = PetBubbleController()
+    private weak var languageStore: LanguageStore?
     private var trackingTimer: Timer?
     private var roamTimer: Timer?
+    private var idleTimer: Timer?
     private var currentScreenNumber: NSNumber?
     private var isDragging = false
     private var dockEdge: PetDockEdge?
@@ -20,6 +24,7 @@ final class PetController {
     private let positionXKey = "BoomPet.petPositionX"
     private let positionYKey = "BoomPet.petPositionY"
     private let autoRoamKey = "BoomPet.petAutoRoam"
+    private let dialogueEnabledKey = "BoomPet.petDialogueEnabled"
     private let dockEdgeKey = "BoomPet.petDockEdge"
 
     init(
@@ -27,6 +32,7 @@ final class PetController {
         onTestBoom: @escaping () -> Void,
         languageStore: LanguageStore
     ) {
+        self.languageStore = languageStore
         let size = NSSize(width: 154, height: 154)
         panel = PetPanel(
             contentRect: NSRect(origin: .zero, size: size),
@@ -43,11 +49,26 @@ final class PetController {
         petView.onDragStateChanged = { [weak self] dragging in
             self?.isDragging = dragging
             if dragging {
+                self?.showInteraction(.drag, bypassCooldown: true)
                 self?.leaveDockForDragging()
             }
         }
         petView.onDragEnded = { [weak self] in
             self?.saveCurrentPosition()
+        }
+        petView.onDragMoved = { [weak self] in
+            self?.repositionBubble()
+        }
+        petView.onHover = { [weak self] in
+            self?.showInteraction(.hover)
+        }
+        petView.onTapped = { [weak self] in
+            guard let self else { return }
+            if dockEdge != nil {
+                restoreFromDock()
+            } else {
+                showInteraction(.tap)
+            }
         }
         panel.contentView = petView
         if let rawEdge = UserDefaults.standard.string(forKey: dockEdgeKey) {
@@ -68,19 +89,30 @@ final class PetController {
         RunLoop.main.add(trackingTimer!, forMode: .common)
 
         roamTimer = Timer.scheduledTimer(
-            withTimeInterval: 4.5,
+            withTimeInterval: 6.0,
             repeats: true
         ) { [weak self] _ in
             self?.performSmallRoam()
         }
         RunLoop.main.add(roamTimer!, forMode: .common)
+
+        idleTimer = Timer.scheduledTimer(
+            withTimeInterval: 11,
+            repeats: true
+        ) { [weak self] _ in
+            self?.performIdleInteraction()
+        }
+        RunLoop.main.add(idleTimer!, forMode: .common)
     }
 
     func stop() {
         trackingTimer?.invalidate()
         roamTimer?.invalidate()
+        idleTimer?.invalidate()
         trackingTimer = nil
         roamTimer = nil
+        idleTimer = nil
+        bubbleController.hide()
         panel.close()
     }
 
@@ -112,19 +144,41 @@ final class PetController {
             return
         }
 
-        let base = savedOrigin(in: screen)
-        let target = clampedOrigin(
-            NSPoint(
-                x: base.x + CGFloat.random(in: -58...34),
-                y: base.y + CGFloat.random(in: -18...42)
-            ),
-            in: screen
-        )
+        let current = panel.frame.origin
+        let available = screen.visibleFrame.insetBy(dx: 18, dy: 18)
+        let target: NSPoint
+        if behaviorEngine.shouldStartLongRoam {
+            target = clampedOrigin(
+                NSPoint(
+                    x: CGFloat.random(
+                        in: available.minX...(available.maxX - panel.frame.width)
+                    ),
+                    y: CGFloat.random(
+                        in: available.minY...(available.maxY - panel.frame.height)
+                    )
+                ),
+                in: screen
+            )
+        } else {
+            target = clampedOrigin(
+                NSPoint(
+                    x: current.x + CGFloat.random(in: -180...180),
+                    y: current.y + CGFloat.random(in: -85...85)
+                ),
+                in: screen
+            )
+        }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 1.2
+            context.duration = Double.random(in: 1.1...2.0)
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrameOrigin(target)
+        } completionHandler: { [weak self] in
+            guard let self else { return }
+            repositionBubble()
+            if behaviorEngine.shouldSpeakWhileRoaming {
+                showInteraction(.roam)
+            }
         }
     }
 
@@ -145,6 +199,7 @@ final class PetController {
             dockEdge = nearest.0
             UserDefaults.standard.set(nearest.0.rawValue, forKey: dockEdgeKey)
             petView.peekEdge = nearest.0
+            bubbleController.hide()
             panel.setFrameOrigin(dockedOrigin(for: nearest.0, in: screen))
         } else {
             dockEdge = nil
@@ -221,6 +276,55 @@ final class PetController {
         UserDefaults.standard.removeObject(forKey: dockEdgeKey)
     }
 
+    private func restoreFromDock() {
+        guard dockEdge != nil,
+              let screen = screen(at: NSPoint(x: panel.frame.midX, y: panel.frame.midY)) else {
+            return
+        }
+        dockEdge = nil
+        petView.peekEdge = nil
+        UserDefaults.standard.removeObject(forKey: dockEdgeKey)
+        panel.setFrameOrigin(undockedSavedOrigin(in: screen))
+        showInteraction(.returnFromDock, bypassCooldown: true)
+    }
+
+    private func performIdleInteraction() {
+        guard !isDragging,
+              dockEdge == nil,
+              Int.random(in: 0..<100) < 38 else {
+            return
+        }
+        showInteraction(.idle)
+    }
+
+    private func showInteraction(
+        _ event: PetInteractionEvent,
+        bypassCooldown: Bool = false
+    ) {
+        guard UserDefaults.standard.bool(forKey: dialogueEnabledKey),
+              let languageStore,
+              let message = behaviorEngine.message(
+                for: event,
+                language: languageStore,
+                bypassCooldown: bypassCooldown
+              ),
+              let screen = screen(
+                at: NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+              ) else {
+            return
+        }
+        bubbleController.show(message: message, near: panel.frame, on: screen)
+    }
+
+    private func repositionBubble() {
+        guard let screen = screen(
+            at: NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        ) else {
+            return
+        }
+        bubbleController.reposition(near: panel.frame, on: screen)
+    }
+
     private func clampedOrigin(_ origin: NSPoint, in screen: NSScreen) -> NSPoint {
         let frame = screen.visibleFrame.insetBy(dx: 10, dy: 10)
         return NSPoint(
@@ -278,6 +382,9 @@ final class PetView: NSView {
     var onTestBoom: (() -> Void)?
     var onDragStateChanged: ((Bool) -> Void)?
     var onDragEnded: (() -> Void)?
+    var onDragMoved: (() -> Void)?
+    var onHover: (() -> Void)?
+    var onTapped: (() -> Void)?
     private var hoverArea: NSTrackingArea?
     private var dragStartMouseLocation: NSPoint?
     private var dragStartWindowOrigin: NSPoint?
@@ -313,7 +420,7 @@ final class PetView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if let peekEdge {
-            drawPeekingHead(at: peekEdge)
+            drawDockIcon(at: peekEdge)
             return
         }
         image.draw(
@@ -326,6 +433,7 @@ final class PetView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         animateScale(to: 1.06)
+        onHover?()
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -365,6 +473,7 @@ final class PetView: NSView {
             y: min(max(proposed.y, visible.minY), visible.maxY - panel.frame.height)
         )
         panel.setFrameOrigin(clamped)
+        onDragMoved?()
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -380,6 +489,7 @@ final class PetView: NSView {
             return
         }
 
+        onTapped?()
         let animation = CAKeyframeAnimation(keyPath: "transform.rotation.z")
         animation.values = [0, -0.10, 0.10, -0.05, 0.05, 0]
         animation.duration = 0.42
@@ -434,8 +544,50 @@ final class PetView: NSView {
         layer.add(animation, forKey: "petScale")
     }
 
-    private func drawPeekingHead(at edge: PetDockEdge) {
-        let revealSize: CGFloat = 70
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let peekEdge, !dockIconRect(for: peekEdge).contains(point) {
+            return nil
+        }
+        return super.hitTest(point)
+    }
+
+    private func drawDockIcon(at edge: PetDockEdge) {
+        let targetRect = dockIconRect(for: edge)
+        let background = NSBezierPath(
+            roundedRect: targetRect,
+            xRadius: targetRect.width / 2,
+            yRadius: targetRect.height / 2
+        )
+        NSGradient(
+            starting: .systemOrange,
+            ending: .systemPink
+        )?.draw(in: background, angle: -55)
+
+        NSColor.white.withAlphaComponent(0.82).setStroke()
+        background.lineWidth = 2
+        background.stroke()
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let icon = NSAttributedString(
+            string: "🐾",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 29),
+                .paragraphStyle: paragraph
+            ]
+        )
+        icon.draw(
+            in: NSRect(
+                x: targetRect.minX,
+                y: targetRect.minY + 9,
+                width: targetRect.width,
+                height: 38
+            )
+        )
+    }
+
+    private func dockIconRect(for edge: PetDockEdge) -> NSRect {
+        let revealSize: CGFloat = 58
         let targetRect: NSRect
         switch edge {
         case .left:
@@ -468,20 +620,6 @@ final class PetView: NSView {
             )
         }
 
-        let sourceSize = image.size
-        let sourceRect = NSRect(
-            x: sourceSize.width * 0.12,
-            y: sourceSize.height * 0.40,
-            width: sourceSize.width * 0.76,
-            height: sourceSize.height * 0.58
-        )
-        image.draw(
-            in: targetRect,
-            from: sourceRect,
-            operation: .sourceOver,
-            fraction: 1,
-            respectFlipped: true,
-            hints: [.interpolation: NSImageInterpolation.high]
-        )
+        return targetRect
     }
 }
