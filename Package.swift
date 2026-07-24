@@ -14,7 +14,9 @@ let package = Package(
         .executableTarget(
             name: "BoomPet",
             exclude: [
-                "Resources/pet-chroma.png"
+                "Resources/pet-chroma.png",
+                "Resources/pet-sprite-chroma.png",
+                "Resources/pet-sprite.png"
             ],
             resources: [
                 .process("Resources")

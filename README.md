@@ -14,6 +14,10 @@ BoomPet 会把宠物保持在鼠标所在的显示器与桌面空间中。你可
 - 宠物可拖拽、记忆位置并进行小范围自动活动
 - 拖到屏幕边缘后，宠物会收起并显示固定爪印图标
 - 悬停、点击、拖拽、发呆和游走时会出现淘气的思考气泡
+- 内置宠物采用身体、头、耳、眼、嘴、前爪和尾巴分层动画
+- 静止约 2 FPS、移动最高 12 FPS，不可见时暂停刷新以降低 CPU 占用
+- 宠物尺寸可在设置中按 `80–260 px` 调整
+- 互动台词可按六种场景分别配置中文与英文，每行一句
 - 内置本地心情与行为引擎，无需联网或 API Key
 - 自定义周期任务，任务列表首次启动时为空
 - 提醒严格对齐整分钟的 `00` 秒，连续运行不会逐次漂移
@@ -23,7 +27,14 @@ BoomPet 会把宠物保持在鼠标所在的显示器与桌面空间中。你可
 - 支持导入 PNG、JPG、GIF 与 WebP 宠物图片
 - 导入时自动去除边缘纯色背景并裁切透明空白
 - 支持跟随系统、中文和 English
-- 所有任务和图片均在本机处理，不依赖网络服务
+- 鼠标所在屏幕选区截图与离线 macOS Vision OCR
+- OCR 结果编辑、复制、自动互译；历史默认保存 200 条
+- OCR 历史上限可在 `20–2000` 条之间设置
+- 支持百度翻译、OpenAI Compatible、DeepL 和 LibreTranslate
+- 可选剪贴板文本历史和基础选区贴图
+- 翻译 API Key 保存于 macOS Keychain
+- 提醒、宠物、OCR 与翻译集中在同一设置窗口的三个页签
+- 每日自动检查 GitHub Releases；有新版时由宠物气泡提醒
 
 ## 系统要求
 
@@ -33,6 +44,7 @@ BoomPet 会把宠物保持在鼠标所在的显示器与桌面空间中。你可
 | 架构 | Intel `x86_64` / Apple Silicon `arm64` |
 | 开发工具 | Apple Command Line Tools 或完整 Xcode |
 | Swift | Swift 6 工具链；源码使用 Swift 5 语言模式 |
+| 权限 | 使用选区 OCR/贴图时需要“屏幕录制”权限 |
 
 ## 快速开始
 
@@ -43,7 +55,7 @@ cd BoomPet
 swift run BoomPet
 ```
 
-应用启动后不会自动创建提醒。右键桌面宠物并选择“提醒设置…”即可添加第一条任务。
+应用启动后不会自动创建提醒。右键桌面宠物并选择“设置…”即可添加第一条任务。
 
 ## 构建 macOS 应用
 
@@ -67,7 +79,7 @@ dist/BoomPet.app
 
 ### 管理提醒
 
-1. 右键宠物，选择“提醒设置…”。
+1. 右键宠物，选择“设置…”。
 2. 输入提醒内容和周期分钟数。
 3. 点击“添加”。
 4. 使用任务行中的“预览”按钮立即查看 BOOM。
@@ -99,22 +111,90 @@ dist/BoomPet.app
 
 系统界面、右键菜单和 BOOM 标题会切换语言；用户自己填写的任务内容保持原文。
 
+### OCR、翻译与贴图
+
+可以通过宠物右键菜单或全局快捷键调用：
+
+| 快捷键 | 功能 |
+| --- | --- |
+| `⌥S` | 框选屏幕区域并使用 macOS Vision OCR |
+| `⌥T` | 框选屏幕区域并创建置顶贴图 |
+| `⌘⇧V` | 切换右上角 OCR、剪贴板历史面板 |
+
+OCR 完全在本机完成，不需要 Key。翻译默认关闭；启用百度、OpenAI、DeepL 或 LibreTranslate 后，识别出的文字会按用户设置发送给对应服务商。
+
+`⌘⇧V` 会在鼠标所在显示器右上角切换 `300×440 pt` 的独立轻量历史面板（对齐旧版 Retina 下的 `600×880 px`）。它支持搜索正文、翻译和备注；备注以蓝色 `remark · 正文` 单行展示，备注、置顶与删除按钮仅在鼠标经过记录时出现。点击正文会复制完整内容并自动收起面板。重复内容不会新增第二条，而是保留备注/置顶并刷新时间。
+
+## 在线更新与自动发版
+
+BoomPet 使用公开的 GitHub Releases API：
+
+```text
+https://api.github.com/repos/vinfolhu/boom/releases/latest
+```
+
+应用启动约 5 秒后检查一次，此后最多每天自动检查一次。检测到更高的正式版本时，宠物会用气泡提醒；右键宠物选择“检查更新…”，或者点击历史窗口的“检查更新”，即可直接下载 Release 中名为 `BoomPet-macOS-universal.zip` 的资源。若 Release 没有这个文件，则打开对应版本页面。
+
+仓库已经包含 [release.yml](.github/workflows/release.yml)。发布步骤：
+
+```bash
+# 1. 修改 VERSION，例如 0.2.0，并提交
+git add VERSION
+git commit -m "chore: prepare v0.2.0"
+git push origin master
+
+# 2. 创建并推送同版本 tag
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+推送 `v*` tag 后，GitHub Actions 会：
+
+1. 执行 BoomPet 自检。
+2. 分别构建 `x86_64` 与 `arm64`。
+3. 合并通用应用并生成 ZIP。
+4. 生成 SHA-256 校验文件。
+5. 创建 GitHub Release 并上传两个文件。
+
+也可以在 GitHub 的 Actions 页面手动运行工作流。手动运行只生成可下载的 Actions Artifact，不自动创建 Release。
+
+如果发布步骤提示 `Resource not accessible by integration`，请进入仓库：
+
+```text
+Settings → Actions → General → Workflow permissions
+```
+
+选择 `Read and write permissions` 后重新运行。
+
+### Releases 还是 Packages？
+
+桌面应用请选择 **Releases**。GitHub Packages 面向 npm、Maven、NuGet、RubyGems 和容器等包管理器，不提供通用的 macOS `.app` 分发格式。
+
+当前脚本使用 ad-hoc 签名，适合开发测试。正式公开发布应配置 Apple Developer ID 签名与 notarization。完成正式签名之前，BoomPet 只负责直接下载 ZIP，不会静默替换正在运行的应用；用户需要退出旧版本并手动替换。
+
+首次使用框选功能时，请在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 BoomPet，然后重新启动应用。
+
 ## 数据与隐私
 
-BoomPet 不会上传提醒内容或宠物图片，也不包含遥测代码。
+BoomPet 不会上传提醒内容或宠物图片，也不包含遥测代码。只有在用户配置并调用翻译服务时，待翻译文本才会发送给选定的第三方服务商。
 
 | 数据 | 保存位置 |
 | --- | --- |
 | 提醒、语言及宠物位置 | macOS `UserDefaults`，Bundle ID 为 `com.local.BoomPet` |
 | 自定义宠物图片 | `~/Library/Application Support/BoomPet/custom-pet.png` |
+| OCR 与剪贴板历史 | macOS `UserDefaults`，同时兼容镜像至 `~/.vinfol/history.json`，默认 200 条 |
+| 翻译 API Key / Secret | macOS Keychain |
+| 翻译兼容配置 | `~/.vinfol/ocr_trans.json`（密钥仍由 Keychain 管理） |
 
 卸载应用不会自动删除以上用户数据。
 
+首次运行新版时，如果检测到 `~/.vinfol/ocr_trans.json` 与 `~/.vinfol/history.json`，会只读迁移受支持的翻译设置和历史；旧文件不会被修改或删除。
+
 ## 智能行为与外部 API
 
-当前“智能宠物”由本地行为引擎驱动，包括心情状态、事件台词、冷却时间、移动范围和随机探索。悬停、点击、拖拽、发呆与游走都能获得即时反馈，不需要 API Key，也不会发送桌面行为数据。
+BoomPet 是原生 Swift/AppKit + SwiftUI 应用，不包含 Tauri、React、WebView 或 Rust 运行时。当前“智能宠物”由本地行为引擎驱动，包括心情状态、可配置事件台词、冷却时间、全屏移动范围和随机探索。悬停、点击、拖拽、发呆与游走都能获得即时反馈；内置宠物还会眨眼、摆耳、张嘴、摆尾和活动前爪。不需要 API Key，也不会发送桌面行为数据。
 
-未来可以增加可选的 LLM 对话插件，用于生成更长、更个性化的聊天内容。建议保持以下边界：
+翻译模块可以按用户配置访问第三方 API；它与宠物行为引擎相互独立。未来仍可增加可选的 LLM 对话插件，用于生成更长、更个性化的聊天内容。建议保持以下边界：
 
 - 移动、提醒、动画和即时交互始终在本机执行。
 - 外部 AI 必须由用户主动启用。
@@ -136,6 +216,11 @@ BoomPet 不会上传提醒内容或宠物图片，也不包含遥测代码。
 │   ├── Localization.swift
 │   ├── PetAssetStore.swift
 │   ├── PetImageProcessor.swift
+│   ├── ScreenRegionCapture.swift
+│   ├── OCRServices.swift
+│   ├── OCRCoordinator.swift
+│   ├── OCRCenterView.swift
+│   ├── GlobalHotKeyManager.swift
 │   └── Resources
 ├── scripts/build-app.sh
 └── ASSET_PROMPT.md
@@ -145,12 +230,17 @@ BoomPet 不会上传提醒内容或宠物图片，也不包含遥测代码。
 
 - `PetController`：悬浮窗口、多显示器跟随、拖拽、游走及边缘停靠。
 - `PetBehaviorEngine`：本地心情状态、事件台词、频率控制及游走倾向。
+- `PetDialogueStore`：六类互动场景的中英文台词配置与本地持久化。
 - `PetBubbleController`：自动选择宠物上方或下方位置的思考气泡。
 - `ReminderStore`：任务持久化和整分钟时间计算。
 - `ReminderScheduler`：绝对时间调度、睡眠唤醒检查。
 - `BoomController`：全屏提醒窗口和漫画动画。
 - `PetImageProcessor`：本地背景去除与内容裁切。
 - `LanguageStore`：系统语言检测及中英文切换。
+- `ScreenRegionCapture`：鼠标所在显示器的交互式区域框选。
+- `VisionOCRService`：macOS 本地文字识别。
+- `OCRCoordinator`：OCR、翻译、结果窗口、历史与贴图流程。
+- `GlobalHotKeyManager`：Carbon 全局快捷键注册。
 
 ## 自检
 
@@ -168,12 +258,16 @@ swift build
 - 周期不漂移
 - 任务标题修改
 - 纯色背景自动抠图
+- 自动互译方向检测
+- macOS Vision OCR
 
 ## 已知限制
 
 - 当前仅支持 macOS，AppKit 代码不能直接编译成 Windows `.exe`。
 - GIF 导入后暂时以静态图片显示。
 - 自动抠图适合透明或纯色背景，不是通用的 AI 图像分割。
+- 贴图目前支持置顶、移动和缩放，尚未移植原工具的马赛克与文字标注。
+- 当前仅移植 macOS 本地 Vision OCR；云端 OCR 服务商尚未接入。
 - 本地打包脚本生成的是临时签名应用，公开分发仍需开发者签名和公证。
 
 ## 贡献

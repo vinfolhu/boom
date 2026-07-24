@@ -20,6 +20,7 @@ final class PetBubbleController {
     func show(message: String, near petFrame: NSRect, on screen: NSScreen) {
         hideTimer?.invalidate()
         bubbleView.message = message
+        resize(for: petFrame, on: screen)
         position(near: petFrame, on: screen)
 
         panel.alphaValue = 0
@@ -37,7 +38,16 @@ final class PetBubbleController {
 
     func reposition(near petFrame: NSRect, on screen: NSScreen) {
         guard panel.isVisible else { return }
+        resize(for: petFrame, on: screen)
         position(near: petFrame, on: screen)
+    }
+
+    private func resize(for petFrame: NSRect, on screen: NSScreen) {
+        let requestedScale = petFrame.width / 154
+        let maximumScale = (screen.visibleFrame.width - 16) / 286
+        let scale = min(maximumScale, max(0.5, requestedScale))
+        panel.setContentSize(NSSize(width: 286 * scale, height: 104 * scale))
+        bubbleView.scale = scale
     }
 
     private func position(near petFrame: NSRect, on screen: NSScreen) {
@@ -106,6 +116,9 @@ final class PetBubblePanel: NSPanel {
 }
 
 final class PetBubbleView: NSView {
+    var scale: CGFloat = 1 {
+        didSet { needsDisplay = true }
+    }
     var message = "" {
         didSet { needsDisplay = true }
     }
@@ -115,10 +128,14 @@ final class PetBubbleView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        NSGraphicsContext.saveGraphicsState()
+        let transform = NSAffineTransform()
+        transform.scale(by: scale)
+        transform.concat()
         let mainRect = NSRect(
             x: 8,
             y: pointsDown ? 25 : 8,
-            width: bounds.width - 16,
+            width: 286 - 16,
             height: 70
         )
 
@@ -130,7 +147,7 @@ final class PetBubbleView: NSView {
         bubble.stroke()
 
         let cloudY: CGFloat = pointsDown ? 14 : 91
-        let cloudX = bounds.midX + 38
+        let cloudX: CGFloat = 143 + 38
         NSColor.white.withAlphaComponent(0.97).setFill()
         NSBezierPath(ovalIn: NSRect(x: cloudX, y: cloudY, width: 17, height: 17)).fill()
         NSBezierPath(
@@ -161,5 +178,6 @@ final class PetBubbleView: NSView {
                 height: 28
             )
         )
+        NSGraphicsContext.restoreGraphicsState()
     }
 }

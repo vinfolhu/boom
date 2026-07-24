@@ -59,3 +59,5 @@ tmp/
 
 # Generated intermediate image; keep the processed pet.png
 Sources/BoomPet/Resources/pet-chroma.png
+Sources/BoomPet/Resources/pet-sprite-chroma.png
+Sources/BoomPet/Resources/pet-sprite.png

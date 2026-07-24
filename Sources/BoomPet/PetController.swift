@@ -19,6 +19,7 @@ final class PetController {
     private var idleTimer: Timer?
     private var currentScreenNumber: NSNumber?
     private var isDragging = false
+    private var isTemporarilyHidden = false
     private var dockEdge: PetDockEdge?
 
     private let positionXKey = "BoomPet.petPositionX"
@@ -26,14 +27,21 @@ final class PetController {
     private let autoRoamKey = "BoomPet.petAutoRoam"
     private let dialogueEnabledKey = "BoomPet.petDialogueEnabled"
     private let dockEdgeKey = "BoomPet.petDockEdge"
+    private let petSizeKey = "BoomPet.petSize"
 
     init(
         onOpenSettings: @escaping () -> Void,
         onTestBoom: @escaping () -> Void,
+        onStartOCR: @escaping () -> Void,
+        onShowOCRHistory: @escaping () -> Void,
+        onStartSticky: @escaping () -> Void,
+        onCheckUpdates: @escaping () -> Void,
         languageStore: LanguageStore
     ) {
         self.languageStore = languageStore
-        let size = NSSize(width: 154, height: 154)
+        let savedSize = UserDefaults.standard.double(forKey: petSizeKey)
+        let side = CGFloat(min(260, max(80, savedSize > 0 ? savedSize : 154)))
+        let size = NSSize(width: side, height: side)
         panel = PetPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -46,6 +54,10 @@ final class PetController {
         petView.languageStore = languageStore
         petView.onOpenSettings = onOpenSettings
         petView.onTestBoom = onTestBoom
+        petView.onStartOCR = onStartOCR
+        petView.onShowOCRHistory = onShowOCRHistory
+        petView.onStartSticky = onStartSticky
+        petView.onCheckUpdates = onCheckUpdates
         petView.onDragStateChanged = { [weak self] dragging in
             self?.isDragging = dragging
             if dragging {
@@ -89,7 +101,7 @@ final class PetController {
         RunLoop.main.add(trackingTimer!, forMode: .common)
 
         roamTimer = Timer.scheduledTimer(
-            withTimeInterval: 6.0,
+            withTimeInterval: 3.2,
             repeats: true
         ) { [weak self] _ in
             self?.performSmallRoam()
@@ -117,12 +129,47 @@ final class PetController {
     }
 
     func reloadImage() {
-        petView.image = AssetLoader.petImage()
-        petView.needsDisplay = true
+        petView.reloadArtwork()
+    }
+
+    func updateSize(_ requestedSize: CGFloat) {
+        let side = min(260, max(80, requestedSize))
+        let oldCenter = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        panel.setContentSize(NSSize(width: side, height: side))
+        let candidate = NSPoint(
+            x: oldCenter.x - side / 2,
+            y: oldCenter.y - side / 2
+        )
+        if let screen = screen(at: oldCenter) {
+            panel.setFrameOrigin(clampedOrigin(candidate, in: screen))
+        }
+        UserDefaults.standard.set(Double(side), forKey: petSizeKey)
+        saveCurrentPosition()
+        repositionBubble()
+    }
+
+    func showSystemMessage(_ message: String) {
+        guard let screen = screen(
+            at: NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        ) else {
+            return
+        }
+        bubbleController.show(message: message, near: panel.frame, on: screen)
+    }
+
+    func setTemporarilyHidden(_ hidden: Bool) {
+        isTemporarilyHidden = hidden
+        if hidden {
+            bubbleController.hide()
+            panel.orderOut(nil)
+        } else {
+            moveToMouseScreen(force: true)
+            panel.orderFrontRegardless()
+        }
     }
 
     private func moveToMouseScreen(force: Bool = false) {
-        guard !isDragging else { return }
+        guard !isDragging, !isTemporarilyHidden else { return }
         let mouseLocation = NSEvent.mouseLocation
         guard let screen = screen(at: mouseLocation) else {
             return
@@ -147,7 +194,7 @@ final class PetController {
         let current = panel.frame.origin
         let available = screen.visibleFrame.insetBy(dx: 18, dy: 18)
         let target: NSPoint
-        if behaviorEngine.shouldStartLongRoam {
+        if behaviorEngine.shouldStartLongRoam || Int.random(in: 0..<100) < 72 {
             target = clampedOrigin(
                 NSPoint(
                     x: CGFloat.random(
@@ -169,12 +216,15 @@ final class PetController {
             )
         }
 
+        let distance = hypot(target.x - current.x, target.y - current.y)
+        petView.setMoving(true, facingRight: target.x >= current.x)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Double.random(in: 1.1...2.0)
+            context.duration = min(2.75, max(0.8, Double(distance / 230)))
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrameOrigin(target)
         } completionHandler: { [weak self] in
             guard let self else { return }
+            petView.setMoving(false, facingRight: target.x >= current.x)
             repositionBubble()
             if behaviorEngine.shouldSpeakWhileRoaming {
                 showInteraction(.roam)
@@ -374,12 +424,17 @@ final class PetPanel: NSPanel {
 
 final class PetView: NSView {
     var image = NSImage()
+    private var spriteParts: [NSImage]? = AssetLoader.petSpriteParts()
     weak var languageStore: LanguageStore?
     var peekEdge: PetDockEdge? {
         didSet { needsDisplay = true }
     }
     var onOpenSettings: (() -> Void)?
     var onTestBoom: (() -> Void)?
+    var onStartOCR: (() -> Void)?
+    var onShowOCRHistory: (() -> Void)?
+    var onStartSticky: (() -> Void)?
+    var onCheckUpdates: (() -> Void)?
     var onDragStateChanged: ((Bool) -> Void)?
     var onDragEnded: (() -> Void)?
     var onDragMoved: (() -> Void)?
@@ -389,14 +444,48 @@ final class PetView: NSView {
     private var dragStartMouseLocation: NSPoint?
     private var dragStartWindowOrigin: NSPoint?
     private var didDrag = false
+    private var animationTimer: Timer?
+    private var lastAnimationFrame = Date.distantPast
+    private var isMoving = false
+    private var facingRight = true
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) {
+            [weak self] _ in self?.animationTick()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        animationTimer = timer
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        animationTimer?.invalidate()
+    }
+
+    func reloadArtwork() {
+        image = AssetLoader.petImage()
+        spriteParts = AssetLoader.petSpriteParts()
+        needsDisplay = true
+    }
+
+    func setMoving(_ moving: Bool, facingRight: Bool) {
+        isMoving = moving
+        self.facingRight = facingRight
+        needsDisplay = true
+    }
+
+    private func animationTick() {
+        guard window?.isVisible == true else { return }
+        let now = Date()
+        let interval: TimeInterval = (isMoving || didDrag) ? (1.0 / 12.0) : 0.5
+        guard now.timeIntervalSince(lastAnimationFrame) >= interval else { return }
+        lastAnimationFrame = now
+        needsDisplay = true
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
@@ -423,12 +512,17 @@ final class PetView: NSView {
             drawDockIcon(at: peekEdge)
             return
         }
-        image.draw(
-            in: bounds.insetBy(dx: 3, dy: 3),
-            from: .zero,
-            operation: .sourceOver,
-            fraction: 1
-        )
+        if let spriteParts, spriteParts.count == 8 {
+            drawAnimatedPet(parts: spriteParts)
+        } else {
+            let time = CACurrentMediaTime()
+            let bounce = sin(time * (isMoving ? 8 : 2.2)) * (isMoving ? 4 : 1.4)
+            drawTransformed(
+                image,
+                in: bounds.insetBy(dx: 3, dy: 3).offsetBy(dx: 0, dy: bounce),
+                rotation: sin(time * 2.1) * (isMoving ? 0.045 : 0.012)
+            )
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -462,6 +556,7 @@ final class PetView: NSView {
         }
 
         guard didDrag else { return }
+        setMoving(true, facingRight: deltaX >= 0)
         let targetScreen = NSScreen.screens.first {
             NSMouseInRect(mouse, $0.frame, false)
         } ?? NSScreen.main
@@ -483,6 +578,7 @@ final class PetView: NSView {
         }
 
         if didDrag {
+            setMoving(false, facingRight: facingRight)
             onDragStateChanged?(false)
             onDragEnded?()
             didDrag = false
@@ -502,13 +598,34 @@ final class PetView: NSView {
         }
         let menu = NSMenu()
         menu.addItem(
-            withTitle: text("提醒设置…", "Reminder Settings…"),
+            withTitle: text("屏幕 OCR  ⌥S", "Screen OCR  ⌥S"),
+            action: #selector(startOCR),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: text("历史记录  ⌘⇧V", "History  ⌘⇧V"),
+            action: #selector(showOCRHistory),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: text("选区贴图  ⌥T", "Sticky Capture  ⌥T"),
+            action: #selector(startSticky),
+            keyEquivalent: ""
+        )
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: text("设置…", "Settings…"),
             action: #selector(openSettings),
             keyEquivalent: ","
         )
         menu.addItem(
             withTitle: text("立即测试 BOOM", "Preview BOOM"),
             action: #selector(testBoom),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: text("检查更新…", "Check for Updates…"),
+            action: #selector(checkUpdates),
             keyEquivalent: ""
         )
         menu.addItem(.separator())
@@ -529,6 +646,22 @@ final class PetView: NSView {
         onTestBoom?()
     }
 
+    @objc private func startOCR() {
+        onStartOCR?()
+    }
+
+    @objc private func showOCRHistory() {
+        onShowOCRHistory?()
+    }
+
+    @objc private func startSticky() {
+        onStartSticky?()
+    }
+
+    @objc private func checkUpdates() {
+        onCheckUpdates?()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -542,6 +675,103 @@ final class PetView: NSView {
         animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
         layer.setValue(scale, forKeyPath: "transform.scale")
         layer.add(animation, forKey: "petScale")
+    }
+
+    private func drawAnimatedPet(parts: [NSImage]) {
+        let time = CACurrentMediaTime()
+        let cadence = isMoving ? 9.5 : 2.2
+        let step = sin(time * cadence)
+        let bounce = abs(sin(time * cadence)) * (isMoving ? 5.0 : 1.5)
+        let blink = fmod(time, 4.1) < 0.14 ? 0.12 : 1.0
+
+        NSGraphicsContext.saveGraphicsState()
+        let scale = bounds.width / 154
+        let sizeTransform = NSAffineTransform()
+        sizeTransform.scale(by: scale)
+        sizeTransform.concat()
+        if !facingRight, let context = NSGraphicsContext.current?.cgContext {
+            context.translateBy(x: 154, y: 0)
+            context.scaleBy(x: -1, y: 1)
+        }
+
+        drawTransformed(
+            parts[7],
+            in: NSRect(x: 99, y: 16 + bounce * 0.3, width: 49, height: 84),
+            rotation: step * (isMoving ? 0.30 : 0.16),
+            anchor: NSPoint(x: 0.2, y: 0.2)
+        )
+        drawTransformed(
+            parts[0],
+            in: NSRect(x: 17, y: 4 + bounce, width: 91, height: 81),
+            rotation: step * (isMoving ? 0.025 : 0.008)
+        )
+        drawTransformed(
+            parts[2],
+            in: NSRect(x: 24, y: 105 + bounce, width: 34, height: 43),
+            rotation: -0.08 + step * 0.08,
+            anchor: NSPoint(x: 0.7, y: 0.1)
+        )
+        drawTransformed(
+            parts[3],
+            in: NSRect(x: 101, y: 105 + bounce, width: 35, height: 43),
+            rotation: 0.08 - step * 0.08,
+            anchor: NSPoint(x: 0.3, y: 0.1)
+        )
+        let headBob = bounce + sin(time * 2.6) * 1.2
+        drawTransformed(
+            parts[1],
+            in: NSRect(x: 27, y: 51 + headBob, width: 105, height: 91),
+            rotation: step * (isMoving ? 0.035 : 0.012)
+        )
+        drawTransformed(
+            parts[4],
+            in: NSRect(x: 45, y: 83 + headBob, width: 67, height: 29),
+            scaleY: blink
+        )
+        drawTransformed(
+            parts[5],
+            in: NSRect(x: 65, y: 68 + headBob, width: 28, height: 20),
+            scaleY: 0.88 + abs(step) * (isMoving ? 0.25 : 0.08)
+        )
+        drawTransformed(
+            parts[6],
+            in: NSRect(
+                x: 43 + step * (isMoving ? 2 : 0.4),
+                y: 25 + bounce,
+                width: 64,
+                height: 51
+            ),
+            rotation: step * (isMoving ? 0.07 : 0.015)
+        )
+
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawTransformed(
+        _ image: NSImage,
+        in rect: NSRect,
+        rotation: CGFloat = 0,
+        scaleY: CGFloat = 1,
+        anchor: NSPoint = NSPoint(x: 0.5, y: 0.5)
+    ) {
+        NSGraphicsContext.saveGraphicsState()
+        let pivot = NSPoint(
+            x: rect.minX + rect.width * anchor.x,
+            y: rect.minY + rect.height * anchor.y
+        )
+        let transform = NSAffineTransform()
+        transform.translateX(by: pivot.x, yBy: pivot.y)
+        transform.rotate(byRadians: rotation)
+        transform.scaleX(by: 1, yBy: scaleY)
+        transform.translateX(by: -pivot.x, yBy: -pivot.y)
+        transform.concat()
+        image.draw(
+            in: rect,
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

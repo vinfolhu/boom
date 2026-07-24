@@ -87,8 +87,47 @@ func runSelfTests() -> Int32 {
         return 1
     }
 
+    guard TranslationService.detectedSourceLanguage(for: "Hello world") == "en",
+          TranslationService.detectedSourceLanguage(for: "你好，世界") == "zh",
+          TranslationService.defaultTargetLanguage(for: "Hello") == "zh" else {
+        fputs("FAIL: OCR 自动互译方向异常\n", stderr)
+        return 1
+    }
+
+    guard UpdateService.isNewer("0.2.0", than: "0.1.9"),
+          UpdateService.isNewer("1.0.0", than: "0.99.99"),
+          !UpdateService.isNewer("0.1.0", than: "0.1.0"),
+          !UpdateService.isNewer("0.1.9", than: "0.2.0") else {
+        fputs("FAIL: GitHub Release 版本比较异常\n", stderr)
+        return 1
+    }
+
+    let textImage = NSImage(size: NSSize(width: 520, height: 140))
+    textImage.lockFocus()
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: 520, height: 140).fill()
+    let sampleText = NSAttributedString(
+        string: "HELLO 123",
+        attributes: [
+            .font: NSFont.systemFont(ofSize: 58, weight: .bold),
+            .foregroundColor: NSColor.black
+        ]
+    )
+    sampleText.draw(at: NSPoint(x: 60, y: 38))
+    textImage.unlockFocus()
+    guard let textCGImage = textImage.cgImage(
+        forProposedRect: nil,
+        context: nil,
+        hints: nil
+    ),
+    let recognized = try? VisionOCRService.recognizeSynchronously(textCGImage),
+    recognized.uppercased().contains("HELLO") else {
+        fputs("FAIL: macOS Vision OCR 自检失败\n", stderr)
+        return 1
+    }
+
     print(
-        "PASS: 无默认任务、整分钟触发、周期无漂移、标题可修改、自动抠图、本地行为引擎"
+        "PASS: 提醒调度、标题修改、自动抠图、本地行为引擎、语言检测、版本比较、Vision OCR"
     )
     return 0
 }
