@@ -24,15 +24,12 @@ final class ScreenRegionCapture {
             completion(.failure(CaptureError.captureInProgress))
             return
         }
-        guard ensurePermission() else {
-            completion(.failure(CaptureError.permissionDenied))
-            return
-        }
 
         let temporaryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("boompet-capture-\(UUID().uuidString)")
             .appendingPathExtension("png")
         let process = Process()
+        let errorPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = [
             "-x",       // no shutter sound
@@ -41,6 +38,7 @@ final class ScreenRegionCapture {
             "-t", "png",
             temporaryURL.path
         ]
+        process.standardError = errorPipe
         activeProcess = process
         activeTemporaryURL = temporaryURL
 
@@ -56,10 +54,17 @@ final class ScreenRegionCapture {
                 guard finishedProcess.terminationStatus == 0,
                       FileManager.default.fileExists(atPath: temporaryURL.path)
                 else {
+                    let errorData = errorPipe.fileHandleForReading
+                        .readDataToEndOfFile()
+                    let systemError = String(
+                        data: errorData,
+                        encoding: .utf8
+                    ) ?? ""
                     completion(.failure(
-                        CGPreflightScreenCaptureAccess()
-                            ? CaptureError.cancelled
-                            : CaptureError.permissionDenied
+                        self.captureFailure(
+                            status: finishedProcess.terminationStatus,
+                            systemError: systemError
+                        )
                     ))
                     return
                 }
@@ -87,11 +92,17 @@ final class ScreenRegionCapture {
         }
     }
 
-    private func ensurePermission() -> Bool {
-        if CGPreflightScreenCaptureAccess() {
-            return true
+    private func captureFailure(
+        status: Int32,
+        systemError: String
+    ) -> CaptureError {
+        let message = systemError.lowercased()
+        if message.contains("permission")
+            || message.contains("not authorized")
+            || message.contains("denied") {
+            return .permissionDenied
         }
-        return CGRequestScreenCaptureAccess()
+        return status == 0 ? .captureFailed : .cancelled
     }
 }
 

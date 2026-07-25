@@ -13,23 +13,57 @@ func renderAppIcon(to outputURL: URL) -> Int32 {
     image.lockFocus()
 
     let bounds = NSRect(origin: .zero, size: size)
-    let background = NSGradient(colors: [
-        NSColor(calibratedRed: 1.00, green: 0.78, blue: 0.28, alpha: 1),
-        NSColor(calibratedRed: 0.95, green: 0.25, blue: 0.08, alpha: 1)
-    ])
-    background?.draw(in: bounds, angle: -52)
+    NSColor.clear.setFill()
+    bounds.fill()
 
-    NSColor.white.withAlphaComponent(0.18).setFill()
-    NSBezierPath(ovalIn: NSRect(x: 80, y: 560, width: 310, height: 310)).fill()
-    NSBezierPath(ovalIn: NSRect(x: 720, y: 700, width: 110, height: 110)).fill()
-    NSBezierPath(ovalIn: NSRect(x: 790, y: 150, width: 170, height: 170)).fill()
+    let iconRect = bounds.insetBy(dx: 54, dy: 54)
+    let iconShape = NSBezierPath(
+        roundedRect: iconRect,
+        xRadius: 205,
+        yRadius: 205
+    )
+    NSGraphicsContext.saveGraphicsState()
+    let shadow = NSShadow()
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.30)
+    shadow.shadowBlurRadius = 30
+    shadow.shadowOffset = NSSize(width: 0, height: -18)
+    shadow.set()
+    NSColor(calibratedRed: 0.92, green: 0.24, blue: 0.07, alpha: 1)
+        .setFill()
+    iconShape.fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    NSGraphicsContext.saveGraphicsState()
+    iconShape.addClip()
+    let background = NSGradient(colors: [
+        NSColor(calibratedRed: 1.00, green: 0.70, blue: 0.24, alpha: 1),
+        NSColor(calibratedRed: 0.98, green: 0.30, blue: 0.08, alpha: 1)
+    ])
+    background?.draw(in: iconRect, angle: -55)
+
+    NSColor.white.withAlphaComponent(0.16).setFill()
+    NSBezierPath(ovalIn: NSRect(x: 88, y: 570, width: 330, height: 330)).fill()
+    NSBezierPath(ovalIn: NSRect(x: 735, y: 720, width: 105, height: 105)).fill()
+    NSColor(calibratedRed: 0.65, green: 0.05, blue: 0.01, alpha: 0.10)
+        .setFill()
+    NSBezierPath(ovalIn: NSRect(x: 730, y: 105, width: 250, height: 250)).fill()
 
     rig.draw(
         animation: "idle",
         elapsed: 0.35,
-        in: NSRect(x: 112, y: 82, width: 800, height: 800),
+        in: NSRect(x: 135, y: 105, width: 754, height: 754),
         facingRight: true
     )
+    NSGraphicsContext.restoreGraphicsState()
+
+    let innerHighlight = NSBezierPath(
+        roundedRect: iconRect.insetBy(dx: 5, dy: 5),
+        xRadius: 200,
+        yRadius: 200
+    )
+    NSColor.white.withAlphaComponent(0.32).setStroke()
+    innerHighlight.lineWidth = 9
+    innerHighlight.stroke()
     image.unlockFocus()
 
     guard let cgImage = image.cgImage(

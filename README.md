@@ -175,14 +175,14 @@ https://github.com/vinfolhu/boom/releases/latest
 仓库已经包含 [release.yml](.github/workflows/release.yml)。发布步骤：
 
 ```bash
-# 1. 修改 VERSION，例如 0.2.4，并提交
+# 1. 修改 VERSION，例如 0.2.5，并提交
 git add VERSION
-git commit -m "chore: prepare v0.2.4"
+git commit -m "chore: prepare v0.2.5"
 git push origin master
 
 # 2. 创建并推送同版本 tag
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.2.5
+git push origin v0.2.5
 ```
 
 也可以在提交所有修改后运行一键脚本：
