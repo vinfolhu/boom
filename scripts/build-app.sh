@@ -47,6 +47,36 @@ for RIG_PART in \
         "$RIG_RESOURCES_DIR/$RIG_PART.png"
 done
 
+ICON_TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/boompet-icon.XXXXXX")"
+cleanup_icon_temp() {
+    if [[ "$ICON_TEMP_DIR" == */boompet-icon.* && -d "$ICON_TEMP_DIR" ]]; then
+        rm -rf -- "$ICON_TEMP_DIR"
+    fi
+}
+trap cleanup_icon_temp EXIT
+
+case "$(uname -m)" in
+    arm64)
+        ICON_RENDERER="$ARM_BUILD_DIR/arm64-apple-macosx/release/BoomPet"
+        ;;
+    *)
+        ICON_RENDERER="$X86_BUILD_DIR/x86_64-apple-macosx/release/BoomPet"
+        ;;
+esac
+
+ICON_SOURCE="$ICON_TEMP_DIR/icon-1024.png"
+ICONSET_DIR="$ICON_TEMP_DIR/BoomPet.iconset"
+mkdir -p "$ICONSET_DIR"
+"$ICON_RENDERER" --render-app-icon "$ICON_SOURCE"
+for ICON_SIZE in 16 32 128 256 512; do
+    sips -z "$ICON_SIZE" "$ICON_SIZE" "$ICON_SOURCE" \
+        --out "$ICONSET_DIR/icon_${ICON_SIZE}x${ICON_SIZE}.png" >/dev/null
+    DOUBLE_SIZE=$((ICON_SIZE * 2))
+    sips -z "$DOUBLE_SIZE" "$DOUBLE_SIZE" "$ICON_SOURCE" \
+        --out "$ICONSET_DIR/icon_${ICON_SIZE}x${ICON_SIZE}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/BoomPet.icns"
+
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -57,7 +87,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>
     <string>BoomPet</string>
     <key>CFBundleIdentifier</key>
-    <string>com.local.BoomPet</string>
+    <string>com.vinfol.boom</string>
+    <key>CFBundleIconFile</key>
+    <string>BoomPet.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -81,5 +113,15 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 chmod +x "$MACOS_DIR/BoomPet"
-codesign --force --deep --sign - "$APP_DIR"
+if [[ -n "${BOOMPET_CODESIGN_IDENTITY:-}" ]]; then
+    codesign \
+        --force \
+        --deep \
+        --options runtime \
+        --timestamp \
+        --sign "$BOOMPET_CODESIGN_IDENTITY" \
+        "$APP_DIR"
+else
+    codesign --force --deep --sign - "$APP_DIR"
+fi
 echo "$APP_DIR"

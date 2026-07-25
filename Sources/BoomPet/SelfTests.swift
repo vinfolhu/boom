@@ -1,6 +1,60 @@
 import AppKit
 import Foundation
 
+func renderAppIcon(to outputURL: URL) -> Int32 {
+    guard let directory = PetRigStore.bundledDirectory,
+          let rig = try? PetRigRuntime(directory: directory) else {
+        fputs("Unable to load the bundled pet rig.\n", stderr)
+        return 1
+    }
+
+    let size = NSSize(width: 1024, height: 1024)
+    let image = NSImage(size: size)
+    image.lockFocus()
+
+    let bounds = NSRect(origin: .zero, size: size)
+    let background = NSGradient(colors: [
+        NSColor(calibratedRed: 1.00, green: 0.78, blue: 0.28, alpha: 1),
+        NSColor(calibratedRed: 0.95, green: 0.25, blue: 0.08, alpha: 1)
+    ])
+    background?.draw(in: bounds, angle: -52)
+
+    NSColor.white.withAlphaComponent(0.18).setFill()
+    NSBezierPath(ovalIn: NSRect(x: 80, y: 560, width: 310, height: 310)).fill()
+    NSBezierPath(ovalIn: NSRect(x: 720, y: 700, width: 110, height: 110)).fill()
+    NSBezierPath(ovalIn: NSRect(x: 790, y: 150, width: 170, height: 170)).fill()
+
+    rig.draw(
+        animation: "idle",
+        elapsed: 0.35,
+        in: NSRect(x: 112, y: 82, width: 800, height: 800),
+        facingRight: true
+    )
+    image.unlockFocus()
+
+    guard let cgImage = image.cgImage(
+        forProposedRect: nil,
+        context: nil,
+        hints: nil
+    ) else {
+        return 1
+    }
+    let representation = NSBitmapImageRep(cgImage: cgImage)
+    guard let png = representation.representation(
+        using: .png,
+        properties: [:]
+    ) else {
+        return 1
+    }
+    do {
+        try png.write(to: outputURL, options: .atomic)
+        return 0
+    } catch {
+        fputs("\(error.localizedDescription)\n", stderr)
+        return 1
+    }
+}
+
 func renderRigPreview(to outputURL: URL) -> Int32 {
     guard let directory = PetRigStore.activeDirectory,
           let rig = try? PetRigRuntime(directory: directory) else {

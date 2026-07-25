@@ -94,7 +94,9 @@ dist/BoomPet-macOS-universal.zip.sha256
 供程序自动更新或备用下载。脚本和 GitHub Actions 使用同一套打包流程，并从
 `VERSION` 读取版本号。
 
-脚本使用本地临时签名，适合开发和本机运行。面向其他用户正式发布时，需要使用 Apple Developer ID 签名并完成 Apple 公证。
+未配置证书时脚本使用本地临时签名，适合开发和本机运行。设置
+`BOOMPET_CODESIGN_IDENTITY` 后，打包脚本会使用对应 Developer ID 证书签名。
+面向其他用户正式发布时，还应完成 Apple 公证。
 
 构建产物不应提交到 Git，请通过 GitHub Releases 发布压缩后的应用。
 
@@ -168,14 +170,14 @@ https://api.github.com/repos/vinfolhu/boom/releases/latest
 仓库已经包含 [release.yml](.github/workflows/release.yml)。发布步骤：
 
 ```bash
-# 1. 修改 VERSION，例如 0.2.1，并提交
+# 1. 修改 VERSION，例如 0.2.2，并提交
 git add VERSION
-git commit -m "chore: prepare v0.2.1"
+git commit -m "chore: prepare v0.2.2"
 git push origin master
 
 # 2. 创建并推送同版本 tag
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
 推送 `v*` tag 后，GitHub Actions 会：
@@ -208,7 +210,32 @@ Settings → Actions → General → Workflow permissions
 
 桌面应用请选择 **Releases**。GitHub Packages 面向 npm、Maven、NuGet、RubyGems 和容器等包管理器，不提供通用的 macOS `.app` 分发格式。
 
-当前脚本使用 ad-hoc 签名，适合开发测试。正式公开发布应配置 Apple Developer ID 签名与 notarization。完成正式签名之前，BoomPet 只负责下载 DMG/ZIP，不会静默替换正在运行的应用；用户需要退出旧版本并手动替换。
+未配置证书时脚本使用 ad-hoc 签名，适合开发测试。正式公开发布应配置 Apple Developer ID 签名与 notarization。完成正式签名之前，BoomPet 只负责下载 DMG/ZIP，不会静默替换正在运行的应用；用户需要退出旧版本并手动替换。
+
+### 稳定权限与钥匙串身份
+
+ad-hoc 签名会随每次构建改变代码身份，因此 macOS 可能在更新后重新询问钥匙串
+或屏幕录制权限。BoomPet 不再在启动时读取翻译密钥；只有打开 OCR/翻译设置或
+真正请求翻译时才访问钥匙串。要让公开版本升级后稳定继承权限，应使用同一张
+Apple Developer ID Application 证书签署每个版本。
+
+GitHub 仓库的 `Settings → Secrets and variables → Actions` 可配置：
+
+| Secret | 内容 |
+| --- | --- |
+| `BUILD_CERTIFICATE_BASE64` | Developer ID Application `.p12` 的 Base64 内容 |
+| `P12_PASSWORD` | 导出 `.p12` 时设置的密码 |
+| `KEYCHAIN_PASSWORD` | CI 临时钥匙串使用的随机密码 |
+| `MACOS_CODESIGN_IDENTITY` | 完整签名名称，例如 `Developer ID Application: Name (TEAMID)` |
+
+生成证书 Secret：
+
+```bash
+base64 -i DeveloperIDApplication.p12 | pbcopy
+```
+
+没有配置以上 Secrets 时，GitHub Actions 会继续生成 ad-hoc 测试包；配置后会
+自动导入证书，并让打包脚本使用稳定身份签名。
 
 首次使用框选功能时，请在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 BoomPet，然后重新启动应用。
 
@@ -218,7 +245,7 @@ BoomPet 不会上传提醒内容或宠物图片，也不包含遥测代码。只
 
 | 数据 | 保存位置 |
 | --- | --- |
-| 提醒、语言及宠物位置 | macOS `UserDefaults`，Bundle ID 为 `com.local.BoomPet` |
+| 提醒、语言及宠物位置 | macOS `UserDefaults`，Bundle ID 为 `com.vinfol.boom` |
 | 自定义宠物图片 | `~/Library/Application Support/BoomPet/custom-pet.png` |
 | OCR 与剪贴板历史 | macOS `UserDefaults`，同时兼容镜像至 `~/.vinfol/history.json`，默认 200 条 |
 | 翻译 API Key / Secret | macOS Keychain |

@@ -109,6 +109,11 @@ struct OCRConfigurationView: View {
         }
         .formStyle(.grouped)
         .padding(8)
+        .onAppear {
+            // Secrets are loaded only when the user opens OCR/translation
+            // settings, never just because BoomPet launched.
+            settings.loadSecretsIfNeeded()
+        }
     }
 }
 

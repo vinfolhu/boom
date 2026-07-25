@@ -5,23 +5,52 @@ final class ScreenRegionCapture {
     private var selectionPanel: RegionSelectionPanel?
 
     func capture(completion: @escaping (Result<CGImage, Error>) -> Void) {
-        guard ensurePermission() else {
-            completion(.failure(CaptureError.permissionDenied))
-            return
-        }
-
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: {
             NSMouseInRect(mouse, $0.frame, false)
         }) ?? NSScreen.main,
         let displayID = screen.deviceDescription[
             NSDeviceDescriptionKey("NSScreenNumber")
-        ] as? CGDirectDisplayID,
-        let screenshot = CGDisplayCreateImage(displayID) else {
+        ] as? CGDirectDisplayID else {
             completion(.failure(CaptureError.captureFailed))
             return
         }
 
+        // CGPreflightScreenCaptureAccess can temporarily report false after an
+        // app replacement even when capture already works. Try the operation
+        // first and ask for permission only when the system actually blocks it.
+        if let screenshot = CGDisplayCreateImage(displayID) {
+            showSelection(
+                on: screen,
+                screenshot: screenshot,
+                completion: completion
+            )
+            return
+        }
+
+        guard requestPermission() else {
+            completion(.failure(CaptureError.permissionDenied))
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let screenshot = CGDisplayCreateImage(displayID) else {
+                completion(.failure(CaptureError.permissionDenied))
+                return
+            }
+            self?.showSelection(
+                on: screen,
+                screenshot: screenshot,
+                completion: completion
+            )
+        }
+    }
+
+    private func showSelection(
+        on screen: NSScreen,
+        screenshot: CGImage,
+        completion: @escaping (Result<CGImage, Error>) -> Void
+    ) {
         let panel = RegionSelectionPanel(
             contentRect: screen.frame,
             styleMask: [.borderless],
@@ -61,7 +90,7 @@ final class ScreenRegionCapture {
         panel.makeFirstResponder(selectionView)
     }
 
-    private func ensurePermission() -> Bool {
+    private func requestPermission() -> Bool {
         if CGPreflightScreenCaptureAccess() {
             return true
         }
@@ -77,7 +106,7 @@ enum CaptureError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .permissionDenied:
-            return "需要开启“屏幕录制”权限后重新启动应用。"
+            return "无法读取屏幕。如果设置中已经开启，请关闭后重新开启 BoomPet 的“屏幕与系统音频录制”权限；使用临时签名的旧版本可能需要重新授权一次。"
         case .captureFailed:
             return "无法截取当前屏幕。"
         case .cancelled:

@@ -19,6 +19,42 @@ jobs:
       - name: Show Swift toolchain
         run: swift --version
 
+      - name: Install optional Developer ID certificate
+        shell: bash
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          if [[ -z "$BUILD_CERTIFICATE_BASE64" ]]; then
+            echo "No signing certificate configured; using ad-hoc signing."
+            exit 0
+          fi
+          : "${P12_PASSWORD:?Missing P12_PASSWORD secret}"
+          : "${KEYCHAIN_PASSWORD:?Missing KEYCHAIN_PASSWORD secret}"
+          : "${MACOS_CODESIGN_IDENTITY:?Missing MACOS_CODESIGN_IDENTITY secret}"
+          CERTIFICATE_PATH="$RUNNER_TEMP/boompet-release.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/boompet-signing.keychain-db"
+          echo -n "$BUILD_CERTIFICATE_BASE64" \
+            | base64 --decode -o "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$P12_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          echo "BOOMPET_CODESIGN_IDENTITY=$MACOS_CODESIGN_IDENTITY" \
+            >> "$GITHUB_ENV"
+
       - name: Resolve version
         id: version
         shell: bash

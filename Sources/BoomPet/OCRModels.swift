@@ -278,10 +278,16 @@ final class OCRSettingsStore: ObservableObject {
         didSet { save() }
     }
     @Published var apiKey: String {
-        didSet { KeychainStore.set(apiKey, account: "translation-api-key") }
+        didSet {
+            guard secretsLoaded else { return }
+            KeychainStore.set(apiKey, account: "translation-api-key")
+        }
     }
     @Published var apiSecret: String {
-        didSet { KeychainStore.set(apiSecret, account: "translation-api-secret") }
+        didSet {
+            guard secretsLoaded else { return }
+            KeychainStore.set(apiSecret, account: "translation-api-secret")
+        }
     }
     @Published var model: String {
         didSet { save() }
@@ -307,6 +313,9 @@ final class OCRSettingsStore: ObservableObject {
     }
 
     private let prefix = "BoomPet.ocr."
+    private var secretsLoaded = false
+    private var pendingLegacyAPIKey = ""
+    private var pendingLegacyAPISecret = ""
 
     init() {
         provider = TranslationProvider(
@@ -314,8 +323,11 @@ final class OCRSettingsStore: ObservableObject {
         ) ?? .disabled
         apiURL = UserDefaults.standard.string(forKey: prefix + "apiURL")
             ?? "https://api.openai.com/v1/chat/completions"
-        apiKey = KeychainStore.get(account: "translation-api-key") ?? ""
-        apiSecret = KeychainStore.get(account: "translation-api-secret") ?? ""
+        // Do not touch Keychain during application launch. Ad-hoc development
+        // builds may have a different code identity after each update, and an
+        // eager read would show a password prompt before translation is used.
+        apiKey = ""
+        apiSecret = ""
         model = UserDefaults.standard.string(forKey: prefix + "model") ?? "gpt-4o-mini"
         targetLanguage = UserDefaults.standard.string(forKey: prefix + "targetLanguage") ?? "auto"
         autoTranslate = UserDefaults.standard.bool(forKey: prefix + "autoTranslate")
@@ -329,7 +341,8 @@ final class OCRSettingsStore: ObservableObject {
     }
 
     var configuration: TranslationConfiguration {
-        TranslationConfiguration(
+        loadSecretsIfNeeded()
+        return TranslationConfiguration(
             provider: provider,
             apiURL: apiURL,
             apiKey: apiKey,
@@ -337,6 +350,31 @@ final class OCRSettingsStore: ObservableObject {
             model: model,
             targetLanguage: targetLanguage
         )
+    }
+
+    func loadSecretsIfNeeded() {
+        guard !secretsLoaded else { return }
+        let keychainAPIKey = KeychainStore.get(account: "translation-api-key")
+        let keychainAPISecret = KeychainStore.get(
+            account: "translation-api-secret"
+        )
+        apiKey = keychainAPIKey ?? pendingLegacyAPIKey
+        apiSecret = keychainAPISecret ?? pendingLegacyAPISecret
+        secretsLoaded = true
+        if keychainAPIKey == nil, !pendingLegacyAPIKey.isEmpty {
+            KeychainStore.set(
+                pendingLegacyAPIKey,
+                account: "translation-api-key"
+            )
+        }
+        if keychainAPISecret == nil, !pendingLegacyAPISecret.isEmpty {
+            KeychainStore.set(
+                pendingLegacyAPISecret,
+                account: "translation-api-secret"
+            )
+        }
+        pendingLegacyAPIKey = ""
+        pendingLegacyAPISecret = ""
     }
 
     func applyDefaults(for provider: TranslationProvider) {
@@ -458,8 +496,10 @@ final class OCRSettingsStore: ObservableObject {
             provider = .disabled
         }
         apiURL = translate["api_url"] as? String ?? apiURL
-        apiKey = translate["api_key"] as? String ?? ""
-        apiSecret = translate["api_secret"] as? String ?? ""
+        pendingLegacyAPIKey = translate["api_key"] as? String ?? ""
+        pendingLegacyAPISecret = translate["api_secret"] as? String ?? ""
+        apiKey = pendingLegacyAPIKey
+        apiSecret = pendingLegacyAPISecret
         model = translate["model"] as? String ?? model
         targetLanguage = translate["target_lang"] as? String ?? "auto"
         autoTranslate = json["auto_translate_after_ocr"] as? Bool ?? false
@@ -469,7 +509,8 @@ final class OCRSettingsStore: ObservableObject {
 }
 
 enum KeychainStore {
-    private static let service = "com.local.BoomPet"
+    private static let service = "com.vinfol.boom"
+    private static let legacyService = "com.local.BoomPet"
 
     static func set(_ value: String, account: String) {
         let query: [String: Any] = [
@@ -485,6 +526,20 @@ enum KeychainStore {
     }
 
     static func get(account: String) -> String? {
+        if let value = get(account: account, service: service) {
+            return value
+        }
+
+        // This runs only when translation secrets are explicitly requested.
+        // Migrate credentials created before the Bundle ID became permanent.
+        if let legacyValue = get(account: account, service: legacyService) {
+            set(legacyValue, account: account)
+            return legacyValue
+        }
+        return nil
+    }
+
+    private static func get(account: String, service: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
