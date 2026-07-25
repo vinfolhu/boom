@@ -155,6 +155,10 @@ dist/BoomPet-macOS-universal.zip.sha256
 
 OCR 完全在本机完成，不需要 Key。翻译默认关闭；启用百度、OpenAI、DeepL 或 LibreTranslate 后，识别出的文字会按用户设置发送给对应服务商。
 
+OCR 与贴图都调用 macOS 原生 `screencapture` 选区，截取当前 Space 中正在显示的
+窗口内容。`⌥S` 的结果只进入 Vision OCR；`⌥T` 的结果只创建置顶贴图，两条
+流程彼此独立。
+
 `⌘⇧V` 会在鼠标所在显示器右上角切换 `300×440 pt` 的独立轻量历史面板（对齐旧版 Retina 下的 `600×880 px`）。它支持搜索正文、翻译和备注；备注以蓝色 `remark · 正文` 单行展示，备注、置顶与删除按钮仅在鼠标经过记录时出现。点击正文会复制完整内容并自动收起面板。重复内容不会新增第二条，而是保留备注/置顶并刷新时间。
 
 ## 在线更新与自动发版
@@ -170,14 +174,14 @@ https://api.github.com/repos/vinfolhu/boom/releases/latest
 仓库已经包含 [release.yml](.github/workflows/release.yml)。发布步骤：
 
 ```bash
-# 1. 修改 VERSION，例如 0.2.2，并提交
+# 1. 修改 VERSION，例如 0.2.3，并提交
 git add VERSION
-git commit -m "chore: prepare v0.2.2"
+git commit -m "chore: prepare v0.2.3"
 git push origin master
 
 # 2. 创建并推送同版本 tag
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 推送 `v*` tag 后，GitHub Actions 会：

@@ -30,25 +30,33 @@ final class OCRCoordinator {
     }
 
     func startOCR() {
-        beginCapture { [weak self] result in
+        beginCapture(for: .ocr) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let image):
-                Task { await self.recognize(image) }
+            case .success(let capture):
+                guard capture.purpose == .ocr else {
+                    self.showError("截图任务类型异常。", purpose: .ocr)
+                    return
+                }
+                Task { await self.recognize(capture.image) }
             case .failure(let error):
-                self.handleCaptureError(error)
+                self.handleCaptureError(error, purpose: .ocr)
             }
         }
     }
 
     func startStickyCapture() {
-        beginCapture { [weak self] result in
+        beginCapture(for: .sticky) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let image):
-                stickyController.show(image: image)
+            case .success(let capture):
+                guard capture.purpose == .sticky else {
+                    self.showError("贴图任务类型异常。", purpose: .sticky)
+                    return
+                }
+                stickyController.show(image: capture.image)
             case .failure(let error):
-                handleCaptureError(error)
+                handleCaptureError(error, purpose: .sticky)
             }
         }
     }
@@ -156,11 +164,14 @@ final class OCRCoordinator {
     }
 
     private func beginCapture(
-        completion: @escaping (Result<CGImage, Error>) -> Void
+        for purpose: ScreenCapturePurpose,
+        completion: @escaping (Result<CapturedScreenRegion, Error>) -> Void
     ) {
+        hideHistoryPopup()
+        resultWindow?.orderOut(nil)
         onCaptureVisibility(true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.capture.capture { result in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.capture.capture(for: purpose) { result in
                 self?.onCaptureVisibility(false)
                 completion(result)
             }
@@ -214,14 +225,25 @@ final class OCRCoordinator {
         window.makeKeyAndOrderFront(nil)
     }
 
-    private func handleCaptureError(_ error: Error) {
+    private func handleCaptureError(
+        _ error: Error,
+        purpose: ScreenCapturePurpose
+    ) {
         if case CaptureError.cancelled = error { return }
-        showError(error.localizedDescription)
+        showError(error.localizedDescription, purpose: purpose)
     }
 
-    private func showError(_ message: String) {
+    private func showError(
+        _ message: String,
+        purpose: ScreenCapturePurpose = .ocr
+    ) {
         let alert = NSAlert()
-        alert.messageText = language.text("OCR 失败", "OCR Failed")
+        switch purpose {
+        case .ocr:
+            alert.messageText = language.text("OCR 失败", "OCR Failed")
+        case .sticky:
+            alert.messageText = language.text("贴图失败", "Sticky Capture Failed")
+        }
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.runModal()

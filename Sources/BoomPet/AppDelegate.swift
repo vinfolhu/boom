@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         language: languageStore,
         onCaptureVisibility: { [weak self] hidden in
             self?.petController?.setTemporarilyHidden(hidden)
+            if hidden {
+                self?.settingsWindow?.orderOut(nil)
+            }
         },
         onOpenSettings: { [weak self] in self?.showSettings(selectedTab: .ocr) },
         onCheckUpdates: { [weak self] in self?.checkForUpdates(silent: false) }
