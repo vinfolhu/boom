@@ -168,14 +168,14 @@ https://api.github.com/repos/vinfolhu/boom/releases/latest
 仓库已经包含 [release.yml](.github/workflows/release.yml)。发布步骤：
 
 ```bash
-# 1. 修改 VERSION，例如 0.2.0，并提交
+# 1. 修改 VERSION，例如 0.2.1，并提交
 git add VERSION
-git commit -m "chore: prepare v0.2.0"
+git commit -m "chore: prepare v0.2.1"
 git push origin master
 
 # 2. 创建并推送同版本 tag
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 推送 `v*` tag 后，GitHub Actions 会：
@@ -185,6 +185,10 @@ git push origin v0.2.0
 3. 合并 Universal 应用。
 4. 生成 DMG 安装盘、ZIP 备用包及 SHA-256 校验文件。
 5. 创建 GitHub Release 并上传四个二进制资产。
+
+已经推送的版本标签不要移动。如果某次发布工作流本身存在问题，应先修复并
+提交工作流，再增加补丁版本（例如从 `v0.2.0` 升到 `v0.2.1`）并推送新标签。
+直接重新运行旧标签的任务，仍会使用该旧提交中的工作流文件。
 
 也可以在 GitHub 的 Actions 页面手动运行工作流。手动运行只生成可下载的 Actions Artifact，不自动创建 Release。
 

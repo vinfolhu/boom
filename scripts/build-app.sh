@@ -33,7 +33,7 @@ lipo -create \
     "$X86_BUILD_DIR/x86_64-apple-macosx/release/BoomPet" \
     "$ARM_BUILD_DIR/arm64-apple-macosx/release/BoomPet" \
     -output "$MACOS_DIR/BoomPet"
-cp "$PROJECT_DIR/Sources/BoomPet/Resources/pet.png" "$RESOURCES_DIR/pet.png"
+strip -x "$MACOS_DIR/BoomPet"
 RIG_RESOURCES_DIR="$RESOURCES_DIR/DefaultPetRig"
 mkdir -p "$RIG_RESOURCES_DIR"
 cp \

@@ -11,10 +11,13 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Show Swift toolchain
+        run: swift --version
 
       - name: Resolve version
         id: version

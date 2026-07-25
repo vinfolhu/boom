@@ -6,17 +6,16 @@ enum AssetLoader {
             return customImage
         }
 
-        if let image = NSImage(named: "pet") {
-            return image
-        }
-
-        if let url = Bundle.main.url(forResource: "pet", withExtension: "png"),
-           let image = NSImage(contentsOf: url) {
-            return image
-        }
-
-        if let url = Bundle.module.url(forResource: "pet", withExtension: "png"),
-           let image = NSImage(contentsOf: url) {
+        if let rig = PetRigStore.loadActive() {
+            let image = NSImage(size: NSSize(width: 512, height: 512))
+            image.lockFocus()
+            rig.draw(
+                animation: "idle",
+                elapsed: 0.35,
+                in: NSRect(x: 0, y: 0, width: 512, height: 512),
+                facingRight: true
+            )
+            image.unlockFocus()
             return image
         }
 
