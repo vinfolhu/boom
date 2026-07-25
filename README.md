@@ -163,26 +163,36 @@ OCR 与贴图都调用 macOS 原生 `screencapture` 选区，截取当前 Space 
 
 ## 在线更新与自动发版
 
-BoomPet 使用公开的 GitHub Releases API：
+BoomPet 通过 GitHub Releases 网页的 `latest` 跳转检查版本：
 
 ```text
-https://api.github.com/repos/vinfolhu/boom/releases/latest
+https://github.com/vinfolhu/boom/releases/latest
 ```
 
-应用启动约 5 秒后检查一次，此后最多每天自动检查一次。检测到更高的正式版本时，宠物会用气泡提醒；右键宠物选择“检查更新…”，或者点击历史窗口的“检查更新”，即可优先下载 Release 中的 `BoomPet-macOS-universal.dmg`，没有 DMG 时回退到同名 ZIP。若两者都不存在，则打开对应版本页面。
+该检查不调用匿名 GitHub API，因此不会消耗每个共享 IP 的 API rate limit。
+应用启动约 5 秒后检查一次，此后最多每天自动检查一次。检测到更高的正式版本时，宠物会用气泡提醒；右键宠物选择“检查更新…”，或者点击历史窗口的“检查更新”，即可下载 Release 中固定名称的 `BoomPet-macOS-universal.dmg`。
 
 仓库已经包含 [release.yml](.github/workflows/release.yml)。发布步骤：
 
 ```bash
-# 1. 修改 VERSION，例如 0.2.3，并提交
+# 1. 修改 VERSION，例如 0.2.4，并提交
 git add VERSION
-git commit -m "chore: prepare v0.2.3"
+git commit -m "chore: prepare v0.2.4"
 git push origin master
 
 # 2. 创建并推送同版本 tag
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
+
+也可以在提交所有修改后运行一键脚本：
+
+```bash
+./scripts/publish-release.sh
+```
+
+脚本会读取 `VERSION`，确认工作区干净且版本已经提交，推送当前分支，创建并推送
+对应的注释标签。标签推送后由 GitHub Actions 自动构建并发布 Release。
 
 推送 `v*` tag 后，GitHub Actions 会：
 

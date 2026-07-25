@@ -15,13 +15,13 @@ enum UpdateCheckResult {
 
 enum UpdateServiceError: LocalizedError {
     case invalidResponse
-    case github(String)
+    case githubWeb(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "GitHub returned an invalid update response."
-        case .github(let message):
+        case .githubWeb(let message):
             return message
         }
     }
@@ -30,48 +30,19 @@ enum UpdateServiceError: LocalizedError {
 final class UpdateService {
     static let repository = "vinfolhu/boom"
     static let releasesURL = URL(string: "https://github.com/vinfolhu/boom/releases")!
-
-    private struct GitHubRelease: Decodable {
-        struct Asset: Decodable {
-            let name: String
-            let browserDownloadURL: URL
-
-            enum CodingKeys: String, CodingKey {
-                case name
-                case browserDownloadURL = "browser_download_url"
-            }
-        }
-
-        let tagName: String
-        let htmlURL: URL
-        let draft: Bool
-        let prerelease: Bool
-        let assets: [Asset]
-
-        enum CodingKeys: String, CodingKey {
-            case tagName = "tag_name"
-            case htmlURL = "html_url"
-            case draft
-            case prerelease
-            case assets
-        }
-    }
-
-    private struct GitHubError: Decodable {
-        let message: String
-    }
+    private static let preferredAssetName = "BoomPet-macOS-universal.dmg"
 
     func checkForUpdates() async throws -> UpdateCheckResult {
         let endpoint = URL(
-            string: "https://api.github.com/repos/\(Self.repository)/releases/latest"
+            string: "https://github.com/\(Self.repository)/releases/latest"
         )!
         var request = URLRequest(url: endpoint)
         request.timeoutInterval = 15
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        request.httpMethod = "HEAD"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("BoomPet/\(Self.currentVersion)", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw UpdateServiceError.invalidResponse
         }
@@ -79,37 +50,52 @@ final class UpdateService {
             return .noPublishedRelease
         }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(GitHubError.self, from: data).message)
-                ?? "GitHub update check failed (\(http.statusCode))."
-            throw UpdateServiceError.github(message)
+            throw UpdateServiceError.githubWeb(
+                "GitHub update check failed (\(http.statusCode))."
+            )
         }
 
-        let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-        guard !release.draft, !release.prerelease else {
-            return .noPublishedRelease
+        guard let resolvedURL = http.url,
+              let release = Self.releaseInfo(from: resolvedURL) else {
+            throw UpdateServiceError.invalidResponse
         }
-        let latest = Self.normalizedVersion(release.tagName)
+        let latest = Self.normalizedVersion(release.tag)
         guard Self.isNewer(latest, than: Self.currentVersion) else {
             return .upToDate(latestVersion: latest)
-        }
-        let preferredAsset = release.assets.first {
-            $0.name.lowercased() == "boompet-macos-universal.dmg"
-        } ?? release.assets.first {
-            $0.name.lowercased() == "boompet-macos-universal.zip"
-        } ?? release.assets.first {
-            let name = $0.name.lowercased()
-            return name.contains("boompet")
-                && name.contains("mac")
-                && (name.hasSuffix(".dmg") || name.hasSuffix(".zip"))
         }
         return .updateAvailable(
             AppUpdateInfo(
                 version: latest,
-                releasePageURL: release.htmlURL,
-                downloadURL: preferredAsset?.browserDownloadURL,
-                assetName: preferredAsset?.name
+                releasePageURL: release.pageURL,
+                downloadURL: release.downloadURL,
+                assetName: Self.preferredAssetName
             )
         )
+    }
+
+    static func releaseInfo(
+        from resolvedURL: URL
+    ) -> (tag: String, pageURL: URL, downloadURL: URL)? {
+        let components = resolvedURL.pathComponents
+        guard let tagIndex = components.firstIndex(of: "tag"),
+              components.indices.contains(tagIndex + 1) else {
+            return nil
+        }
+        let tag = components[tagIndex + 1]
+        let version = normalizedVersion(tag)
+        guard !version.isEmpty,
+              numericComponents(version).contains(where: { $0 > 0 }) else {
+            return nil
+        }
+        guard let pageURL = URL(
+            string: "https://github.com/\(repository)/releases/tag/\(tag)"
+        ), let downloadURL = URL(
+            string: "https://github.com/\(repository)/releases/download/"
+                + "\(tag)/\(preferredAssetName)"
+        ) else {
+            return nil
+        }
+        return (tag, pageURL, downloadURL)
     }
 
     static var currentVersion: String {

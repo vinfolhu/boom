@@ -228,6 +228,18 @@ func runSelfTests() -> Int32 {
         fputs("FAIL: GitHub Release 版本比较异常\n", stderr)
         return 1
     }
+    guard let release = UpdateService.releaseInfo(
+        from: URL(
+            string: "https://github.com/vinfolhu/boom/releases/tag/v0.2.4"
+        )!
+    ), release.tag == "v0.2.4",
+    release.downloadURL.lastPathComponent == "BoomPet-macOS-universal.dmg",
+    UpdateService.releaseInfo(
+        from: URL(string: "https://github.com/vinfolhu/boom/releases")!
+    ) == nil else {
+        fputs("FAIL: GitHub Release 网页跳转解析异常\n", stderr)
+        return 1
+    }
 
     guard let rigDirectory = PetRigStore.bundledDirectory,
           let rig = try? PetRigRuntime(directory: rigDirectory) else {
